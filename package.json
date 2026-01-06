@@ -1,0 +1,14 @@
+{
+  "name": "ralph",
+  "version": "0.1.0",
+  "description": "Ralph Orchestrator - Autonomous coding agent orchestration",
+  "type": "module",
+  "scripts": {
+    "start": "bun ralph.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
