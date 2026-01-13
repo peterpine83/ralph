@@ -1,0 +1,10 @@
+{
+  "features": [
+    {
+      "id": "test-001",
+      "description": "Create a hello.txt file with 'Hello World' content",
+      "passes": true,
+      "verify_command": "test -f hello.txt && grep -q 'Hello World' hello.txt"
+    }
+  ]
+}

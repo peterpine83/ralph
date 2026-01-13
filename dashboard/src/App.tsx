@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback } from "react"
 import { useSSE } from "./hooks/useSSE"
-import { Terminal, type TerminalHandle } from "./components/Terminal"
+import { ActivityLog, type ActivityLogHandle } from "./components/ActivityLog"
 import { FeatureList } from "./components/FeatureList"
 import { Controls } from "./components/Controls"
 import type { Feature, DashboardEvent, StateData, IterationData } from "./types"
 
 function App() {
-  const terminalRef = useRef<TerminalHandle>(null)
+  const activityLogRef = useRef<ActivityLogHandle>(null)
   const [state, setState] = useState<StateData>({
     paused: false,
     running: false,
@@ -31,8 +31,11 @@ function App() {
       case "features":
         setFeatures(event.data.features)
         break
+      case "claude_event":
+        activityLogRef.current?.addEvent(event.data)
+        break
       case "output":
-        terminalRef.current?.write(event.data.text)
+        // Legacy output events - ignore when using structured events
         break
     }
   }, [])
@@ -79,11 +82,11 @@ function App() {
           </div>
         </div>
 
-        {/* Right panel: Terminal */}
+        {/* Right panel: Activity Log */}
         <div style={styles.terminal}>
-          <div style={styles.panelHeader}>Claude Output</div>
+          <div style={styles.panelHeader}>Activity Log</div>
           <div style={styles.terminalContent}>
-            <Terminal ref={terminalRef} />
+            <ActivityLog ref={activityLogRef} />
           </div>
         </div>
       </div>
