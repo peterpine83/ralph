@@ -9,6 +9,8 @@ describe("parseArgs", () => {
       branch: undefined,
       once: false,
       maxIterations: 5,
+      dashboard: false,
+      dashboardPort: 3847,
     });
   });
 
@@ -44,6 +46,8 @@ describe("parseArgs", () => {
       branch: "ralph/feature-branch",
       once: true,
       maxIterations: 20,
+      dashboard: false,
+      dashboardPort: 3847,
     });
   });
 
@@ -59,6 +63,8 @@ describe("parseArgs", () => {
       branch: "my-branch",
       once: true,
       maxIterations: 3,
+      dashboard: false,
+      dashboardPort: 3847,
     });
   });
 
@@ -75,5 +81,21 @@ describe("parseArgs", () => {
   test("parses NaN max-iterations as NaN", () => {
     const result = parseArgs(["--max-iterations", "not-a-number"]);
     expect(result.maxIterations).toBeNaN();
+  });
+
+  test("parses --dashboard flag", () => {
+    const result = parseArgs(["--dashboard"]);
+    expect(result.dashboard).toBe(true);
+  });
+
+  test("parses --dashboard-port flag", () => {
+    const result = parseArgs(["--dashboard-port", "8080"]);
+    expect(result.dashboardPort).toBe(8080);
+  });
+
+  test("parses dashboard flags together", () => {
+    const result = parseArgs(["--dashboard", "--dashboard-port", "9000"]);
+    expect(result.dashboard).toBe(true);
+    expect(result.dashboardPort).toBe(9000);
   });
 });

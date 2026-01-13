@@ -2,7 +2,7 @@
 // Ralph Orchestrator - Simple loop, Claude picks features
 // Per Anthropic best practices: simple loop, file-based state, no JSON output
 
-import { parseArgs } from "./src/args";
+import { parseArgs } from "./src/args"
 import {
   generateContainerName,
   buildDockerCreateArgs,
@@ -13,7 +13,17 @@ import {
   getRemainingFeatures,
   hasUnpushedCommits,
   type SessionConfig,
-} from "./src/container";
+} from "./src/container"
+import {
+  startDashboardServer,
+  updateState,
+  updateIteration,
+  updateFeatures,
+  sendOutput,
+  isPaused,
+  setPromptTemplate,
+} from "./src/server"
+import type { Feature } from "./src/types"
 
 const TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes per iteration
 const MAX_NO_CHANGE = 3;            // Circuit breaker: 3 iterations with no git diff
@@ -78,12 +88,17 @@ async function createSession(gitRoot: string, branch: string, isResume: boolean)
     await Bun.sleep(1000);
   }
 
-  // Copy project into container
+  // Copy project into container (exclude macOS AppleDouble files)
+  // COPYFILE_DISABLE=1 prevents macOS tar from including resource forks (._* files)
   console.log("Copying project into container...");
-  await Bun.$`tar -C ${gitRoot} -cf - . | docker exec -i ${containerName} tar -xf - -C /workspace`;
+  await Bun.$`COPYFILE_DISABLE=1 tar -C ${gitRoot} --exclude='._*' --exclude='.DS_Store' -cf - . | docker exec -i ${containerName} tar -xf - -C /workspace`;
+
+  // Fix ownership - files are extracted as root, but node user needs write access
+  await Bun.$`docker exec ${containerName} chown -R node:node /workspace`;
 
   // Fix git ownership issues (files copied as root, git runs as node)
-  await Bun.$`docker exec ${containerName} git config --global --add safe.directory /workspace`;
+  // Use --system config (not --global) since .gitconfig is mounted read-only
+  await Bun.$`docker exec ${containerName} git config --system --add safe.directory /workspace`;
 
   // Ensure git credential helper is configured (in case entrypoint didn't run it)
   if (githubToken.trim()) {
@@ -93,11 +108,11 @@ async function createSession(gitRoot: string, branch: string, isResume: boolean)
   if (isResume) {
     // Fetch and checkout existing branch from remote
     console.log(`Resuming branch: ${branch}`);
-    await Bun.$`docker exec ${containerName} git fetch origin ${branch}`;
-    await Bun.$`docker exec ${containerName} git checkout -B ${branch} origin/${branch}`;
+    await Bun.$`docker exec -u node ${containerName} git fetch origin ${branch}`;
+    await Bun.$`docker exec -u node ${containerName} git checkout -B ${branch} origin/${branch}`;
   } else {
     // Create new branch
-    await Bun.$`docker exec ${containerName} git checkout -b ${branch}`;
+    await Bun.$`docker exec -u node ${containerName} git checkout -b ${branch}`;
   }
 
   return containerName;
@@ -108,26 +123,60 @@ async function cleanupSession(containerName: string): Promise<void> {
   await Bun.$`docker rm -f ${containerName}`.quiet().nothrow();
 }
 
-async function runClaudeInContainer(containerName: string, prompt: string, timeoutMs: number): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+async function runClaudeInContainer(
+  containerName: string,
+  prompt: string,
+  timeoutMs: number,
+  dashboardEnabled: boolean
+): Promise<boolean> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const proc = Bun.spawn([
-      "docker", "exec", containerName,
-      "claude", "-p", "--dangerously-skip-permissions", prompt
-    ], { signal: controller.signal, stdout: "inherit", stderr: "inherit" });
+    if (dashboardEnabled) {
+      // Capture stdout and stream to both console and dashboard
+      const proc = Bun.spawn([
+        "docker", "exec", "-u", "node", containerName,
+        "claude", "-p", "--dangerously-skip-permissions", prompt
+      ], { signal: controller.signal, stdout: "pipe", stderr: "pipe" })
 
-    await proc.exited;
-    return true;
-  } catch (e: any) {
-    if (e.name === "AbortError") {
-      console.log("TIMEOUT: Claude killed after timeout");
-      return false;
+      // Stream stdout to console and dashboard
+      const streamOutput = async (stream: ReadableStream<Uint8Array>) => {
+        const reader = stream.getReader()
+        const decoder = new TextDecoder()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const text = decoder.decode(value)
+          process.stdout.write(text)
+          sendOutput(text)
+        }
+      }
+
+      // Process both stdout and stderr in parallel
+      await Promise.all([
+        streamOutput(proc.stdout),
+        streamOutput(proc.stderr),
+        proc.exited,
+      ])
+    } else {
+      // Original behavior: inherit stdout/stderr
+      const proc = Bun.spawn([
+        "docker", "exec", "-u", "node", containerName,
+        "claude", "-p", "--dangerously-skip-permissions", prompt
+      ], { signal: controller.signal, stdout: "inherit", stderr: "inherit" })
+
+      await proc.exited
     }
-    throw e;
+    return true
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "AbortError") {
+      console.log("TIMEOUT: Claude killed after timeout")
+      return false
+    }
+    throw e
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timeout)
   }
 }
 
@@ -140,10 +189,10 @@ async function log(gitRoot: string, message: string) {
 }
 
 async function main() {
-  const { featuresPath, branch: resumeBranch, once, maxIterations } = parseArgs(process.argv.slice(2));
+  const { featuresPath, branch: resumeBranch, once, maxIterations, dashboard, dashboardPort } = parseArgs(process.argv.slice(2))
 
   // Cleanup any stale containers from previous sessions
-  await cleanupStaleContainers();
+  await cleanupStaleContainers()
 
   // Validate environment
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
@@ -182,62 +231,95 @@ async function main() {
   }
 
   // Create and start container (runs firewall init ONCE)
-  console.log(`\n=== Starting Ralph Session ===`);
-  console.log(`Branch: ${branch}`);
-  console.log(`Mode: ${isResume ? 'Resume' : 'New session'}`);
-  const containerName = await createSession(gitRoot, branch, isResume);
-  console.log(`Container: ${containerName}`);
+  console.log(`\n=== Starting Ralph Session ===`)
+  console.log(`Branch: ${branch}`)
+  console.log(`Mode: ${isResume ? 'Resume' : 'New session'}`)
+  const containerName = await createSession(gitRoot, branch, isResume)
+  console.log(`Container: ${containerName}`)
 
   // Read instructions template
-  const instructionsPath = `${RALPH_HOME}/templates/ralph-instructions.md`;
-  const instructions = await Bun.file(instructionsPath).text();
+  const instructionsPath = `${RALPH_HOME}/templates/ralph-instructions.md`
+  const instructions = await Bun.file(instructionsPath).text()
 
-  let iteration = 0;
-  let noChangeCount = 0;
+  // Start dashboard server if enabled
+  if (dashboard) {
+    const dashboardPath = `${RALPH_HOME}/dashboard/dist/index.html`
+    startDashboardServer(dashboardPort, dashboardPath)
+    setPromptTemplate(instructions)
+    updateState({
+      running: true,
+      containerName,
+      branch,
+    })
+  }
+
+  let iteration = 0
+  let noChangeCount = 0
 
   try {
     // Main loop
     while (true) {
-      iteration++;
-
-      if (iteration > maxIterations) {
-        console.log(`\n=== Max iterations reached (${maxIterations}) ===`);
-        break;
+      // Check for pause (dashboard control)
+      if (dashboard && isPaused()) {
+        console.log("Paused - waiting for resume...")
+        while (isPaused()) {
+          await Bun.sleep(500)
+        }
+        console.log("Resumed")
       }
 
-      console.log(`\n=== Iteration ${iteration}/${maxIterations} ===`);
+      iteration++
+
+      if (iteration > maxIterations) {
+        console.log(`\n=== Max iterations reached (${maxIterations}) ===`)
+        break
+      }
+
+      console.log(`\n=== Iteration ${iteration}/${maxIterations} ===`)
 
       // Verify container is still running before proceeding
       if (!await ensureContainerRunning(containerName)) {
-        console.log("ERROR: Failed to restart container, aborting session");
-        break;
+        console.log("ERROR: Failed to restart container, aborting session")
+        break
       }
 
       // Check remaining features (read from container)
-      const featuresJson = await Bun.$`docker exec ${containerName} cat /workspace/${featuresPath}`.text();
-      const remaining = getRemainingFeatures(featuresJson);
+      const featuresJson = await Bun.$`docker exec -u node ${containerName} cat /workspace/${featuresPath}`.text()
+      const remaining = getRemainingFeatures(featuresJson)
 
-      if (remaining.length === 0) {
-        console.log("\n=== All features complete! ===");
-        // Mark PR as ready for review
-        await Bun.$`docker exec ${containerName} gh pr ready ${branch}`.quiet().nothrow();
-        break;
+      // Parse full features list for dashboard
+      if (dashboard) {
+        try {
+          const parsed = JSON.parse(featuresJson) as { features: Feature[] }
+          updateFeatures(parsed.features)
+          updateIteration(iteration, maxIterations, remaining.length)
+        } catch {
+          // Ignore parse errors
+        }
       }
 
-      console.log(`${remaining.length} features remaining.`);
+      if (remaining.length === 0) {
+        console.log("\n=== All features complete! ===")
+        // Mark PR as ready for review
+        await Bun.$`docker exec -u node ${containerName} gh pr ready ${branch}`.quiet().nothrow()
+        break
+      }
+
+      console.log(`${remaining.length} features remaining.`)
 
       // Write prompt to container
-      const promptPath = `/workspace/.ralph-prompt.md`;
-      await Bun.$`docker exec ${containerName} bash -c ${`cat > ${promptPath} << 'PROMPT_EOF'
+      const promptPath = `/workspace/.ralph-prompt.md`
+      await Bun.$`docker exec -u node ${containerName} bash -c ${`cat > ${promptPath} << 'PROMPT_EOF'
 ${instructions}
-PROMPT_EOF`}`;
+PROMPT_EOF`}`
 
       // Run Claude inside container
       const success = await runClaudeInContainer(
         containerName,
         `Read .ralph-prompt.md and follow the instructions.`,
-        TIMEOUT_MS
-      );
+        TIMEOUT_MS,
+        dashboard
+      )
 
       if (!success) {
         noChangeCount++;
@@ -250,10 +332,10 @@ PROMPT_EOF`}`;
       }
 
       // Check if Claude pushed (verify via git log)
-      const pushCheck = await Bun.$`docker exec ${containerName} git log origin/${branch}..HEAD --oneline`.text().catch(() => "");
+      const pushCheck = await Bun.$`docker exec -u node ${containerName} git log origin/${branch}..HEAD --oneline`.text().catch(() => "");
       if (hasUnpushedCommits(pushCheck)) {
         console.log("WARNING: Unpushed commits detected - attempting to push...");
-        const pushResult = await Bun.$`docker exec ${containerName} git push`.nothrow();
+        const pushResult = await Bun.$`docker exec -u node ${containerName} git push`.nothrow();
         if (pushResult.exitCode !== 0) {
           console.log("WARNING: Push failed - may need manual intervention");
           noChangeCount++;
@@ -271,11 +353,15 @@ PROMPT_EOF`}`;
       }
     }
   } finally {
+    // Update dashboard state
+    if (dashboard) {
+      updateState({ running: false })
+    }
     // Always cleanup container
-    await cleanupSession(containerName);
+    await cleanupSession(containerName)
   }
 
-  console.log(`\nTo view PR: gh pr view ${branch}`);
+  console.log(`\nTo view PR: gh pr view ${branch}`)
 }
 
 main().catch(console.error);

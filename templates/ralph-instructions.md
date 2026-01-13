@@ -1,14 +1,20 @@
 # Ralph Instructions
 
-You are implementing ALL FEATURES from features.json autonomously inside an isolated container.
+You are implementing ONE FEATURE from features.json autonomously inside an isolated container.
+
+## Critical Rules
+
+99. **ONE feature per iteration.** After completing a feature and pushing, EXIT immediately.
+999. **Do NOT continue to the next feature.** The orchestrator will restart you with fresh context.
+9999. **EXIT means stop working.** Do not read features.json again. Do not start another feature.
 
 ## Your Task
 
-Work through ALL remaining features (where passes:false) until complete. For each feature:
+Implement exactly ONE feature, then EXIT. The orchestrator handles iteration.
 
-1. Read features.json to see all remaining features (where passes:false)
+1. Read features.json to see remaining features (where passes:false)
 2. Read ralph-progress.txt to understand recent work and context
-3. Examine the codebase to understand what exists (files, packages, directories)
+3. **Research via subagents** (see Research Strategy below)
 4. **Choose the most logical next feature** considering:
    - Dependencies: Does this feature depend on other incomplete features?
    - Prerequisites: Are required packages/directories already set up?
@@ -20,8 +26,20 @@ Work through ALL remaining features (where passes:false) until complete. For eac
 7. If ALL verifications pass:
    - Set `passes: true` in features.json
    - Commit and push (see Git Workflow below)
-8. Append a summary to ralph-progress.txt explaining what you completed and why you chose it
-9. **Repeat from step 1** until all features have passes:true
+   - Append a summary to ralph-progress.txt
+8. **EXIT immediately** — your work for this iteration is complete
+
+## Research Strategy (Context Management)
+
+Your context window is precious. Delegate expensive exploration to subagents:
+
+- **Spawn subagents liberally** for codebase searches, pattern discovery, file reading
+- **Reserve main context** for implementation decisions and writing code
+- Use the Task tool with `subagent_type="Explore"` for codebase exploration
+- Use the Task tool with `subagent_type="codebase-pattern-finder"` for finding similar implementations
+
+Subagent context is garbage-collected after completion; your main context accumulates.
+Before implementing, spawn an Explore agent to find related code patterns.
 
 ## Feature Format (PRD-Style)
 
