@@ -9,7 +9,7 @@
     {
       "id": "test-002",
       "description": "Create a goodbye file",
-      "passes": false,
+      "passes": true,
       "verify_command": "test -f goodbye.txt"
     }
   ]
