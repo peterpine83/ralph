@@ -11,7 +11,8 @@
     "typecheck:watch": "bunx tsc --noEmit --watch"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@effect/platform": "^0.94.1",
