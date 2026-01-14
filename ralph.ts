@@ -25,6 +25,19 @@ import type { ClaudeEvent, Feature } from "./src/types"
 const TIMEOUT_MS = 5 * 60 * 1000  // 5 minutes per iteration
 const MAX_NO_CHANGE = 3           // Circuit breaker: 3 iterations with no git diff
 
+// Generate human-readable branch name: ralph/MMDD-HHMM-{feature-slug}
+function generateBranchName(features: Feature[]): string {
+  const now = new Date()
+  const date = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+  const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+
+  // Get first feature ID, truncate to 25 chars for reasonable branch length
+  const firstFeature = features[0]?.id || 'unknown'
+  const slug = firstFeature.slice(0, 25).replace(/[^a-z0-9-]/gi, '-').toLowerCase()
+
+  return `ralph/${date}-${time}-${slug}`
+}
+
 // IMPORTANT: This script must be run from ~/ralph/ directory
 // The templates are resolved relative to this script's location
 const RALPH_HOME = import.meta.dir
@@ -239,15 +252,16 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  // Verify features.json exists
+  // Verify features.json exists and parse it
   const featuresFile = Bun.file(`${gitRoot}/${featuresPath}`)
   if (!await featuresFile.exists()) {
     console.error(`ERROR: Features file not found: ${featuresPath}`)
     process.exit(1)
   }
+  const featuresData = JSON.parse(await featuresFile.text()) as { features: Feature[] }
 
   // Determine branch name and detect resume mode
-  const branch = resumeBranch || `ralph/${Date.now()}`
+  const branch = resumeBranch || generateBranchName(featuresData.features)
   let isResume = false
 
   if (resumeBranch) {
