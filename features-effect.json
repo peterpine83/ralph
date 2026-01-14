@@ -9,7 +9,7 @@
     {
       "id": "effect-002-errors",
       "description": "Create src/errors/index.ts with all tagged error types: ConfigError, DockerError, ContainerNotFoundError, ClaudeError, TimeoutError, GitError, FeatureError, CircuitBreakerError, StreamError, ValidationError. Each extends Data.TaggedError with appropriate fields per specs/effect-errors.md.",
-      "passes": false,
+      "passes": true,
       "verify_command": "test -f src/errors/index.ts && grep -q 'Data.TaggedError' src/errors/index.ts && grep -q 'DockerError' src/errors/index.ts && grep -q 'TimeoutError' src/errors/index.ts"
     },
     {
