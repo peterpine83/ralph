@@ -83,7 +83,7 @@
         "Verify Context.Tag is used"
       ],
       "verification": "test -f src/services/Git.ts && grep -q 'Context.Tag' src/services/Git.ts && grep -q 'readonly checkout' src/services/Git.ts && grep -q 'readonly push' src/services/Git.ts && grep -q 'readonly hasUnpushedCommits' src/services/Git.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-017",
