@@ -31,7 +31,7 @@
         "Verify ContainerConfig interface is defined"
       ],
       "verification": "test -f src/services/Docker.ts && grep -q 'Context.Tag' src/services/Docker.ts && grep -q 'readonly create' src/services/Docker.ts && grep -q 'readonly inspect' src/services/Docker.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-013",
@@ -44,7 +44,7 @@
         "Check ExecOptions interface is defined"
       ],
       "verification": "grep -q 'readonly exec' src/services/Docker.ts && grep -q 'readonly execStream' src/services/Docker.ts && grep -q 'Stream.Stream' src/services/Docker.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-014",
@@ -57,7 +57,7 @@
         "Check all methods have proper error typing"
       ],
       "verification": "grep -q 'readonly readFile' src/services/Docker.ts && grep -q 'readonly writeFile' src/services/Docker.ts && grep -q 'readonly listByPrefix' src/services/Docker.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-015",
