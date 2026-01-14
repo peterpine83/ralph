@@ -9,6 +9,9 @@ const clients = new Set<ReadableStreamDefaultController<Uint8Array>>()
 const state: DashboardState = {
   paused: false,
   running: false,
+  stepMode: false,
+  stopping: false,
+  claudeRunning: false,
   containerName: "",
   branch: "",
   iteration: 0,
@@ -33,11 +36,19 @@ function broadcast(event: DashboardEvent): void {
 // Public API for orchestrator
 export function updateState(updates: Partial<DashboardState>): void {
   Object.assign(state, updates)
+  broadcastState()
+}
+
+// Broadcast current state to all clients
+function broadcastState(): void {
   broadcast({
     type: "state",
     data: {
       paused: state.paused,
       running: state.running,
+      stepMode: state.stepMode,
+      stopping: state.stopping,
+      claudeRunning: state.claudeRunning,
       containerName: state.containerName,
       branch: state.branch,
     },
@@ -79,6 +90,29 @@ export function isPaused(): boolean {
   return state.paused
 }
 
+export function isStepMode(): boolean {
+  return state.stepMode
+}
+
+export function isStopping(): boolean {
+  return state.stopping
+}
+
+export function setStepMode(enabled: boolean): void {
+  state.stepMode = enabled
+  broadcastState()
+}
+
+export function setStopping(stopping: boolean): void {
+  state.stopping = stopping
+  broadcastState()
+}
+
+export function setClaudeRunning(running: boolean): void {
+  state.claudeRunning = running
+  broadcastState()
+}
+
 export function setPromptTemplate(template: string): void {
   state.promptTemplate = template
 }
@@ -99,6 +133,9 @@ function createSSEStream(): ReadableStream<Uint8Array> {
           data: {
             paused: state.paused,
             running: state.running,
+            stepMode: state.stepMode,
+            stopping: state.stopping,
+            claudeRunning: state.claudeRunning,
             containerName: state.containerName,
             branch: state.branch,
           },
@@ -190,16 +227,29 @@ export function startDashboardServer(port: number, dashboardPath: string): void 
       // Pause/Resume endpoints
       if ((url.pathname === "/pause" || url.pathname === "/resume") && req.method === "POST") {
         state.paused = url.pathname === "/pause"
-        broadcast({
-          type: "state",
-          data: {
-            paused: state.paused,
-            running: state.running,
-            containerName: state.containerName,
-            branch: state.branch,
-          },
-        })
+        broadcastState()
         return new Response(JSON.stringify({ paused: state.paused }), {
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+
+      // Step mode toggle endpoint
+      if (url.pathname === "/step-mode" && req.method === "POST") {
+        return (async () => {
+          const body = await req.json() as { enabled: boolean }
+          state.stepMode = body.enabled
+          broadcastState()
+          return new Response(JSON.stringify({ stepMode: state.stepMode }), {
+            headers: { "Content-Type": "application/json" },
+          })
+        })()
+      }
+
+      // Stop endpoint (graceful shutdown)
+      if (url.pathname === "/stop" && req.method === "POST") {
+        state.stopping = true
+        broadcastState()
+        return new Response(JSON.stringify({ stopping: true }), {
           headers: { "Content-Type": "application/json" },
         })
       }

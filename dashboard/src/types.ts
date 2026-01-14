@@ -10,6 +10,9 @@ export interface Feature {
 export interface StateData {
   paused: boolean
   running: boolean
+  stepMode: boolean
+  stopping: boolean
+  claudeRunning: boolean
   containerName: string
   branch: string
 }

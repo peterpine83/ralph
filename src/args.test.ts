@@ -11,6 +11,7 @@ describe("parseArgs", () => {
       maxIterations: 5,
       dashboard: false,
       dashboardPort: 3847,
+      step: false,
     })
   })
 
@@ -48,6 +49,7 @@ describe("parseArgs", () => {
       maxIterations: 20,
       dashboard: false,
       dashboardPort: 3847,
+      step: false,
     })
   })
 
@@ -65,6 +67,7 @@ describe("parseArgs", () => {
       maxIterations: 3,
       dashboard: false,
       dashboardPort: 3847,
+      step: false,
     })
   })
 
@@ -97,5 +100,17 @@ describe("parseArgs", () => {
     const result = parseArgs(["--dashboard", "--dashboard-port", "9000"])
     expect(result.dashboard).toBe(true)
     expect(result.dashboardPort).toBe(9000)
+  })
+
+  test("parses --step flag", () => {
+    const result = parseArgs(["--step"])
+    expect(result.step).toBe(true)
+  })
+
+  test("parses --step with other flags", () => {
+    const result = parseArgs(["--step", "--dashboard", "--once"])
+    expect(result.step).toBe(true)
+    expect(result.dashboard).toBe(true)
+    expect(result.once).toBe(true)
   })
 })

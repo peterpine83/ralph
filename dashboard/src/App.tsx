@@ -10,6 +10,9 @@ function App() {
   const [state, setState] = useState<StateData>({
     paused: false,
     running: false,
+    stepMode: false,
+    stopping: false,
+    claudeRunning: false,
     containerName: "",
     branch: "",
   })
@@ -40,7 +43,7 @@ function App() {
     }
   }, [])
 
-  const { pause, resume } = useSSE(handleEvent)
+  const { pause, resume, setStepMode, stop } = useSSE(handleEvent)
 
   return (
     <div style={styles.container}>
@@ -67,8 +70,13 @@ function App() {
         <Controls
           paused={state.paused}
           running={state.running}
+          stepMode={state.stepMode}
+          stopping={state.stopping}
+          claudeRunning={state.claudeRunning}
           onPause={pause}
           onResume={resume}
+          onSetStepMode={setStepMode}
+          onStop={stop}
         />
       </header>
 

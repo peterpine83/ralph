@@ -29,6 +29,8 @@
 │  │  ├─ GET  /events     → SSE stream                       │    │
 │  │  ├─ POST /pause      → Pause orchestrator               │    │
 │  │  ├─ POST /resume     → Resume orchestrator              │    │
+│  │  ├─ POST /step-mode  → Toggle step mode                 │    │
+│  │  ├─ POST /stop       → Graceful shutdown                │    │
 │  │  ├─ GET  /prompt     → Get prompt template              │    │
 │  │  ├─ PUT  /prompt     → Update prompt template           │    │
 │  │  └─ GET  /*          → Static files (dashboard UI)      │    │
@@ -138,6 +140,9 @@ function broadcast(event: DashboardEvent) {
 interface DashboardState {
   paused: boolean
   running: boolean
+  stepMode: boolean      // Pause after each iteration
+  stopping: boolean      // Graceful shutdown requested
+  claudeRunning: boolean // Claude process currently active
   containerName: string
   branch: string
   features: Feature[]
@@ -146,6 +151,9 @@ interface DashboardState {
 let state: DashboardState = {
   paused: false,
   running: false,
+  stepMode: false,
+  stopping: false,
+  claudeRunning: false,
   containerName: "",
   branch: "",
   features: []
@@ -204,6 +212,34 @@ app.post("/resume", () => {
   state.paused = false
   broadcast({ type: "state", data: state })
   return new Response("Resumed")
+})
+```
+
+### `POST /step-mode`
+Toggle step mode (pause after each iteration).
+
+**Request**: `{ enabled: boolean }`
+**Response**: `{ stepMode: boolean }`
+
+```typescript
+app.post("/step-mode", async (req) => {
+  const body = await req.json()
+  state.stepMode = body.enabled
+  broadcastState()
+  return Response.json({ stepMode: state.stepMode })
+})
+```
+
+### `POST /stop`
+Request graceful shutdown. Waits for Claude to finish before stopping.
+
+**Response**: `{ stopping: true }`
+
+```typescript
+app.post("/stop", () => {
+  state.stopping = true
+  broadcastState()
+  return Response.json({ stopping: true })
 })
 ```
 
@@ -278,7 +314,7 @@ React-based web interface built with Vite.
 - **FeatureList**: Shows all features with status indicators
 - **ActivityLog**: Scrolling log of Claude output
 - **IterationProgress**: Current iteration / max iterations
-- **Controls**: Pause/Resume buttons
+- **Controls**: Pause/Resume buttons, Step mode toggle, Stop button
 
 ### Technology Stack
 - React 18

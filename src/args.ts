@@ -7,6 +7,7 @@ export interface RalphArgs {
   maxIterations: number
   dashboard: boolean
   dashboardPort: number
+  step: boolean
 }
 
 const DEFAULT_MAX_ITERATIONS = 5
@@ -19,6 +20,7 @@ export function parseArgs(args: string[]): RalphArgs {
   let maxIterations = DEFAULT_MAX_ITERATIONS
   let dashboard = false
   let dashboardPort = DEFAULT_DASHBOARD_PORT
+  let step = false
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -33,6 +35,8 @@ export function parseArgs(args: string[]): RalphArgs {
       i++
     } else if (arg === "--dashboard") {
       dashboard = true
+    } else if (arg === "--step") {
+      step = true
     } else if (arg === "--dashboard-port" && nextArg) {
       dashboardPort = parseInt(nextArg, 10)
       i++
@@ -40,5 +44,5 @@ export function parseArgs(args: string[]): RalphArgs {
       featuresPath = arg
     }
   }
-  return { featuresPath, branch, once, maxIterations, dashboard, dashboardPort }
+  return { featuresPath, branch, once, maxIterations, dashboard, dashboardPort, step }
 }
