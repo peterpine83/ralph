@@ -27,7 +27,7 @@
     {
       "id": "effect-005-claude-service",
       "description": "Create src/services/Claude.ts with ClaudeService interface per specs/effect-services.md. Define run and runWithEvents methods that return Effect and Stream respectively.",
-      "passes": false,
+      "passes": true,
       "verify_command": "test -f src/services/Claude.ts && grep -q 'Context.Tag' src/services/Claude.ts && grep -q 'ClaudeService' src/services/Claude.ts && grep -q 'runWithEvents' src/services/Claude.ts"
     },
     {
