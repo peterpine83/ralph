@@ -121,7 +121,7 @@
         "Test importing from 'src/services' works"
       ],
       "verification": "test -f src/services/index.ts && grep -q 'ConfigService' src/services/index.ts && grep -q 'DockerService' src/services/index.ts",
-      "passes": false
+      "passes": true
     }
   ]
 }
