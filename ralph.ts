@@ -24,6 +24,7 @@ import {
   setStopping,
   setClaudeRunning,
   setPromptTemplate,
+  setOnStopCallback,
 } from "./src/server"
 import type { ClaudeEvent, Feature } from "./src/types"
 
@@ -50,6 +51,12 @@ const RALPH_HOME = import.meta.dir
 // === Signal Handling for Graceful Shutdown ===
 
 let shutdownRequested = false
+let claudeAbortController: AbortController | null = null
+
+// Called by server when stop button is clicked
+export function abortClaude(): void {
+  claudeAbortController?.abort()
+}
 
 function setupSignalHandlers(dashboardEnabled: boolean): void {
   const handleShutdown = () => {
@@ -59,8 +66,8 @@ function setupSignalHandlers(dashboardEnabled: boolean): void {
       process.exit(1)
     }
     shutdownRequested = true
-    console.log("\nGraceful shutdown requested - waiting for Claude to finish...")
-    console.log("Press Ctrl+C again to force exit")
+    console.log("\nShutdown requested - stopping Claude...")
+    abortClaude()  // Kill Claude immediately
     // Update dashboard state if running
     if (dashboardEnabled) {
       setStopping(true)
@@ -196,10 +203,16 @@ async function runClaudeInContainer(
   containerName: string,
   prompt: string,
   timeoutMs: number,
-  dashboardEnabled: boolean
+  dashboardEnabled: boolean,
+  externalSignal?: AbortSignal
 ): Promise<boolean> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutController = new AbortController()
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs)
+
+  // Combine timeout signal with external signal (for stop button)
+  const signal = externalSignal
+    ? AbortSignal.any([timeoutController.signal, externalSignal])
+    : timeoutController.signal
 
   try {
     if (dashboardEnabled) {
@@ -210,7 +223,7 @@ async function runClaudeInContainer(
         "claude", "-p", "--dangerously-skip-permissions",
         "--verbose", "--output-format", "stream-json",
         prompt
-      ], { signal: controller.signal, stdout: "pipe", stderr: "pipe" })
+      ], { signal, stdout: "pipe", stderr: "pipe" })
 
       // Stream stdout as NDJSON and parse structured events
       const streamNDJSON = async (stream: ReadableStream<Uint8Array>) => {
@@ -276,14 +289,15 @@ async function runClaudeInContainer(
       const proc = Bun.spawn([
         "docker", "exec", "-u", "node", containerName,
         "claude", "-p", "--dangerously-skip-permissions", prompt
-      ], { signal: controller.signal, stdout: "inherit", stderr: "inherit" })
+      ], { signal, stdout: "inherit", stderr: "inherit" })
 
       await proc.exited
     }
     return true
   } catch (e: unknown) {
     if (e instanceof Error && e.name === "AbortError") {
-      console.log("TIMEOUT: Claude killed after timeout")
+      // Could be timeout or user-initiated stop
+      console.log("Claude process terminated")
       return false
     }
     throw e
@@ -353,6 +367,7 @@ async function main(): Promise<void> {
   if (dashboard) {
     const dashboardPath = `${RALPH_HOME}/dashboard/dist/index.html`
     startDashboardServer(dashboardPort, dashboardPath)
+    setOnStopCallback(abortClaude)  // Wire up immediate stop
     setPromptTemplate(instructions)
     setStepMode(step)  // Initialize step mode from CLI flag
     updateState({
@@ -434,13 +449,22 @@ PROMPT_EOF`}`
 
       // Run Claude inside container
       if (dashboard) setClaudeRunning(true)
+      claudeAbortController = new AbortController()
       const success = await runClaudeInContainer(
         containerName,
         `Read .ralph-prompt.md and follow the instructions.`,
         TIMEOUT_MS,
-        dashboard
+        dashboard,
+        claudeAbortController.signal
       )
+      claudeAbortController = null
       if (dashboard) setClaudeRunning(false)
+
+      // Check for stop immediately after Claude finishes
+      if (dashboard && isStopping()) {
+        console.log("\n=== Stopped ===")
+        break
+      }
 
       if (!success) {
         noChangeCount++
