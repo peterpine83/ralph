@@ -1,6 +1,6 @@
 // Dashboard SSE server for Ralph orchestrator
 
-import type { DashboardState, DashboardEvent, Feature } from "./types"
+import type { DashboardState, DashboardEvent, Feature, ClaudeEvent } from "./types"
 
 // Connected SSE clients
 const clients = new Set<ReadableStreamDefaultController<Uint8Array>>()
@@ -65,6 +65,13 @@ export function sendOutput(text: string): void {
   broadcast({
     type: "output",
     data: { text, timestamp: Date.now() },
+  })
+}
+
+export function sendClaudeEvent(event: ClaudeEvent): void {
+  broadcast({
+    type: "claude_event",
+    data: event,
   })
 }
 

@@ -20,9 +20,11 @@ import {
   updateIteration,
   updateFeatures,
   sendOutput,
+  sendClaudeEvent,
   isPaused,
   setPromptTemplate,
 } from "./src/server"
+import type { ClaudeEvent } from "./src/types"
 import type { Feature } from "./src/types"
 
 const TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes per iteration
@@ -135,28 +137,71 @@ async function runClaudeInContainer(
   try {
     if (dashboardEnabled) {
       // Capture stdout and stream to both console and dashboard
+      // Use --output-format stream-json for structured events
       const proc = Bun.spawn([
         "docker", "exec", "-u", "node", containerName,
-        "claude", "-p", "--dangerously-skip-permissions", prompt
+        "claude", "-p", "--dangerously-skip-permissions",
+        "--verbose", "--output-format", "stream-json",
+        prompt
       ], { signal: controller.signal, stdout: "pipe", stderr: "pipe" })
 
-      // Stream stdout to console and dashboard
-      const streamOutput = async (stream: ReadableStream<Uint8Array>) => {
+      // Stream stdout as NDJSON and parse structured events
+      const streamNDJSON = async (stream: ReadableStream<Uint8Array>) => {
+        const reader = stream.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() || ""  // Keep incomplete line
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            // Log raw line to console for debugging
+            console.log(line)
+            try {
+              const event = JSON.parse(line) as ClaudeEvent
+              sendClaudeEvent(event)
+            } catch {
+              // If not valid JSON, send as raw output (fallback)
+              sendOutput(line + "\n")
+            }
+          }
+        }
+
+        // Process any remaining buffer
+        if (buffer.trim()) {
+          console.log(buffer)
+          try {
+            const event = JSON.parse(buffer) as ClaudeEvent
+            sendClaudeEvent(event)
+          } catch {
+            sendOutput(buffer + "\n")
+          }
+        }
+      }
+
+      // Stream stderr as raw text (for errors)
+      const streamStderr = async (stream: ReadableStream<Uint8Array>) => {
         const reader = stream.getReader()
         const decoder = new TextDecoder()
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
           const text = decoder.decode(value)
-          process.stdout.write(text)
+          process.stderr.write(text)
           sendOutput(text)
         }
       }
 
       // Process both stdout and stderr in parallel
       await Promise.all([
-        streamOutput(proc.stdout),
-        streamOutput(proc.stderr),
+        streamNDJSON(proc.stdout),
+        streamStderr(proc.stderr),
         proc.exited,
       ])
     } else {
