@@ -29,7 +29,7 @@
         "Check it has 'variable: string' and 'message: string' fields"
       ],
       "verification": "test -f src/errors/index.ts && grep -q 'class ConfigError' src/errors/index.ts && grep -q 'Data.TaggedError' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-003",
@@ -41,7 +41,7 @@
         "Check it has command, exitCode?, stderr?, cause? fields"
       ],
       "verification": "grep -q 'class DockerError' src/errors/index.ts && grep -q 'command:' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-004",
@@ -53,7 +53,7 @@
         "Check it has 'container: string' field"
       ],
       "verification": "grep -q 'class ContainerNotFoundError' src/errors/index.ts && grep -q 'container:' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-005",
@@ -65,7 +65,7 @@
         "Check it has exitCode?, stderr?, cause? fields"
       ],
       "verification": "grep -q 'class ClaudeError' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-006",
@@ -77,7 +77,7 @@
         "Check it has 'operation: string' and 'durationMs: number' fields"
       ],
       "verification": "grep -q 'class TimeoutError' src/errors/index.ts && grep -q 'durationMs' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-007",
@@ -89,7 +89,7 @@
         "Check operation field is typed as union of git operations"
       ],
       "verification": "grep -q 'class GitError' src/errors/index.ts && grep -q 'operation:' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-008",
@@ -101,7 +101,7 @@
         "Check each has appropriate fields per spec"
       ],
       "verification": "grep -q 'class FeatureError' src/errors/index.ts && grep -q 'class CircuitBreakerError' src/errors/index.ts && grep -q 'class StreamError' src/errors/index.ts && grep -q 'class ValidationError' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-009",
@@ -113,7 +113,7 @@
         "Check all 10 error types are included in the union"
       ],
       "verification": "grep -q 'type RalphError' src/errors/index.ts && grep -q 'ConfigError' src/errors/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-010",
