@@ -1,0 +1,132 @@
+{
+  "project": "Ralph Effect Migration - Phase 1: Foundation",
+  "created": "2026-01-14",
+  "tooling": {
+    "package_manager": "bun",
+    "test_runner": "bun test",
+    "build_command": "bun run typecheck"
+  },
+  "features": [
+    {
+      "id": "effect-001",
+      "category": "functional",
+      "description": "Effect.ts dependencies are installed and available for import throughout the codebase",
+      "steps": [
+        "Run 'bun add effect @effect/platform @effect/platform-bun @effect/schema'",
+        "Open a TypeScript file and verify 'import { Effect } from \"effect\"' resolves",
+        "Verify @effect/platform Command module is accessible"
+      ],
+      "verification": "grep -q '\"effect\"' package.json && grep -q '@effect/platform' package.json && grep -q '@effect/platform-bun' package.json",
+      "passes": true
+    },
+    {
+      "id": "effect-002",
+      "category": "functional",
+      "description": "ConfigError is defined as a tagged error with variable and message fields",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify ConfigError extends Data.TaggedError('ConfigError')",
+        "Check it has 'variable: string' and 'message: string' fields"
+      ],
+      "verification": "test -f src/errors/index.ts && grep -q 'class ConfigError' src/errors/index.ts && grep -q 'Data.TaggedError' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-003",
+      "category": "functional",
+      "description": "DockerError is defined with command, exitCode, stderr, and cause fields",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify DockerError extends Data.TaggedError('DockerError')",
+        "Check it has command, exitCode?, stderr?, cause? fields"
+      ],
+      "verification": "grep -q 'class DockerError' src/errors/index.ts && grep -q 'command:' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-004",
+      "category": "functional",
+      "description": "ContainerNotFoundError is defined with container field for missing container scenarios",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify ContainerNotFoundError extends Data.TaggedError('ContainerNotFoundError')",
+        "Check it has 'container: string' field"
+      ],
+      "verification": "grep -q 'class ContainerNotFoundError' src/errors/index.ts && grep -q 'container:' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-005",
+      "category": "functional",
+      "description": "ClaudeError is defined with exitCode, stderr, and cause fields for CLI failures",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify ClaudeError extends Data.TaggedError('ClaudeError')",
+        "Check it has exitCode?, stderr?, cause? fields"
+      ],
+      "verification": "grep -q 'class ClaudeError' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-006",
+      "category": "functional",
+      "description": "TimeoutError is defined with operation and durationMs fields for timeout scenarios",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify TimeoutError extends Data.TaggedError('TimeoutError')",
+        "Check it has 'operation: string' and 'durationMs: number' fields"
+      ],
+      "verification": "grep -q 'class TimeoutError' src/errors/index.ts && grep -q 'durationMs' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-007",
+      "category": "functional",
+      "description": "GitError is defined with operation union type and optional stderr/cause fields",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify GitError extends Data.TaggedError('GitError')",
+        "Check operation field is typed as union of git operations"
+      ],
+      "verification": "grep -q 'class GitError' src/errors/index.ts && grep -q 'operation:' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-008",
+      "category": "functional",
+      "description": "FeatureError, CircuitBreakerError, StreamError, and ValidationError are all defined",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify all four error classes exist with correct TaggedError definitions",
+        "Check each has appropriate fields per spec"
+      ],
+      "verification": "grep -q 'class FeatureError' src/errors/index.ts && grep -q 'class CircuitBreakerError' src/errors/index.ts && grep -q 'class StreamError' src/errors/index.ts && grep -q 'class ValidationError' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-009",
+      "category": "functional",
+      "description": "RalphError union type exports all error types for comprehensive error handling",
+      "steps": [
+        "Open src/errors/index.ts",
+        "Verify 'export type RalphError = ConfigError | DockerError | ...' exists",
+        "Check all 10 error types are included in the union"
+      ],
+      "verification": "grep -q 'type RalphError' src/errors/index.ts && grep -q 'ConfigError' src/errors/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-010",
+      "category": "functional",
+      "description": "Directory structure is created for services, layers, and streams modules",
+      "steps": [
+        "Check src/services/ directory exists",
+        "Check src/layers/ directory exists",
+        "Check src/streams/ directory exists"
+      ],
+      "verification": "test -d src/services && test -d src/layers && test -d src/streams",
+      "passes": false
+    }
+  ]
+}
+
