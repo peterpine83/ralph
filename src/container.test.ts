@@ -1,11 +1,41 @@
 import { describe, expect, test } from "bun:test"
 import {
+  generateBranchName,
   generateContainerName,
   parseStaleContainers,
   parseContainerRunning,
   getRemainingFeatures,
   hasUnpushedCommits,
 } from "./container"
+
+describe("generateBranchName", () => {
+  test("generates branch name with correct format", () => {
+    const name = generateBranchName()
+    // Format: ralph/jan14-1430-a1b2
+    expect(name).toMatch(/^ralph\/[a-z]{3}\d{2}-\d{4}-[a-z0-9]{4}$/)
+  })
+
+  test("starts with ralph/ prefix", () => {
+    const name = generateBranchName()
+    expect(name.startsWith("ralph/")).toBe(true)
+  })
+
+  test("contains valid month abbreviation", () => {
+    const name = generateBranchName()
+    const validMonths = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+    const monthPart = name.split("/")[1]!.substring(0, 3)
+    expect(validMonths).toContain(monthPart)
+  })
+
+  test("generates unique names on successive calls", () => {
+    const names = new Set<string>()
+    for (let i = 0; i < 10; i++) {
+      names.add(generateBranchName())
+    }
+    // Random suffix should make names unique
+    expect(names.size).toBe(10)
+  })
+})
 
 describe("generateContainerName", () => {
   test("generates name with custom session ID", () => {

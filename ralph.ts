@@ -4,6 +4,7 @@
 
 import { parseArgs } from "./src/args"
 import {
+  generateBranchName,
   generateContainerName,
   parseStaleContainers,
   parseContainerRunning,
@@ -247,7 +248,7 @@ async function main(): Promise<void> {
   }
 
   // Determine branch name and detect resume mode
-  const branch = resumeBranch || `ralph/${Date.now()}`
+  const branch = resumeBranch || generateBranchName()
   let isResume = false
 
   if (resumeBranch) {
