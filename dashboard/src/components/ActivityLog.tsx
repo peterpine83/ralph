@@ -74,7 +74,7 @@ export const ActivityLog = forwardRef<ActivityLogHandle>(
               expanded: false,
               toolName: block.name,
               toolInput: block.input,
-              details: JSON.stringify(block.input, null, 2),
+              details: formatToolInput(block.name, block.input || {}),
             })
           }
         }
@@ -256,6 +256,33 @@ function LogItem({
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   return text.slice(0, maxLength) + "..."
+}
+
+function formatToolInput(toolName: string, input: Record<string, unknown>): string {
+  // Fields that contain multi-line text content
+  const contentFields = ["content", "new_string", "old_string"]
+  const hasContentField = contentFields.some(field => typeof input[field] === "string")
+
+  if (!hasContentField) {
+    // Default: use standard JSON formatting
+    return JSON.stringify(input, null, 2)
+  }
+
+  // Build a readable format with content fields expanded
+  const lines: string[] = []
+
+  for (const [key, value] of Object.entries(input)) {
+    if (contentFields.includes(key) && typeof value === "string") {
+      lines.push(`${key}:`)
+      lines.push("─".repeat(40))
+      lines.push(value)
+      lines.push("─".repeat(40))
+    } else {
+      lines.push(`${key}: ${JSON.stringify(value)}`)
+    }
+  }
+
+  return lines.join("\n")
 }
 
 function formatTime(timestamp: number): string {
