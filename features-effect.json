@@ -21,7 +21,7 @@
     {
       "id": "effect-004-docker-service",
       "description": "Create src/services/Docker.ts with DockerService interface per specs/effect-services.md. Define methods: create, start, exec, execStream, inspect, remove, listByPrefix, copyToContainer, readFile, writeFile.",
-      "passes": false,
+      "passes": true,
       "verify_command": "test -f src/services/Docker.ts && grep -q 'Context.Tag' src/services/Docker.ts && grep -q 'DockerService' src/services/Docker.ts && grep -q 'execStream' src/services/Docker.ts"
     },
     {
