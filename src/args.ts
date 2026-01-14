@@ -21,18 +21,23 @@ export function parseArgs(args: string[]): RalphArgs {
   let dashboardPort = DEFAULT_DASHBOARD_PORT
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--branch" && args[i + 1]) {
-      branch = args[++i]
-    } else if (args[i] === "--once") {
+    const arg = args[i]
+    const nextArg = args[i + 1]
+    if (arg === "--branch" && nextArg) {
+      branch = nextArg
+      i++
+    } else if (arg === "--once") {
       once = true
-    } else if (args[i] === "--max-iterations" && args[i + 1]) {
-      maxIterations = parseInt(args[++i], 10)
-    } else if (args[i] === "--dashboard") {
+    } else if (arg === "--max-iterations" && nextArg) {
+      maxIterations = parseInt(nextArg, 10)
+      i++
+    } else if (arg === "--dashboard") {
       dashboard = true
-    } else if (args[i] === "--dashboard-port" && args[i + 1]) {
-      dashboardPort = parseInt(args[++i], 10)
-    } else if (!args[i].startsWith("--")) {
-      featuresPath = args[i]
+    } else if (arg === "--dashboard-port" && nextArg) {
+      dashboardPort = parseInt(nextArg, 10)
+      i++
+    } else if (arg && !arg.startsWith("--")) {
+      featuresPath = arg
     }
   }
   return { featuresPath, branch, once, maxIterations, dashboard, dashboardPort }

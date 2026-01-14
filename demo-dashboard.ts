@@ -65,8 +65,9 @@ const mockOutput = [
 // Stream mock output with delays
 let i = 0
 const interval = setInterval(() => {
-  if (i < mockOutput.length) {
-    sendOutput(mockOutput[i])
+  const output = mockOutput[i]
+  if (output !== undefined) {
+    sendOutput(output)
     i++
   } else {
     // Loop back for continuous demo

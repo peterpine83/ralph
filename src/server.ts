@@ -170,7 +170,7 @@ export function startDashboardServer(port: number, dashboardPath: string): void 
   // Extract dist directory from the index.html path
   const distDir = dashboardPath.replace(/\/index\.html$/, "")
 
-  const server = Bun.serve({
+  Bun.serve({
     port,
     fetch(req) {
       const url = new URL(req.url)
@@ -187,9 +187,9 @@ export function startDashboardServer(port: number, dashboardPath: string): void 
         })
       }
 
-      // Pause endpoint
-      if (url.pathname === "/pause" && req.method === "POST") {
-        state.paused = true
+      // Pause/Resume endpoints
+      if ((url.pathname === "/pause" || url.pathname === "/resume") && req.method === "POST") {
+        state.paused = url.pathname === "/pause"
         broadcast({
           type: "state",
           data: {
@@ -199,24 +199,7 @@ export function startDashboardServer(port: number, dashboardPath: string): void 
             branch: state.branch,
           },
         })
-        return new Response(JSON.stringify({ paused: true }), {
-          headers: { "Content-Type": "application/json" },
-        })
-      }
-
-      // Resume endpoint
-      if (url.pathname === "/resume" && req.method === "POST") {
-        state.paused = false
-        broadcast({
-          type: "state",
-          data: {
-            paused: state.paused,
-            running: state.running,
-            containerName: state.containerName,
-            branch: state.branch,
-          },
-        })
-        return new Response(JSON.stringify({ paused: false }), {
+        return new Response(JSON.stringify({ paused: state.paused }), {
           headers: { "Content-Type": "application/json" },
         })
       }
