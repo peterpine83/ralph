@@ -125,7 +125,7 @@
         "Check src/streams/ directory exists"
       ],
       "verification": "test -d src/services && test -d src/layers && test -d src/streams",
-      "passes": false
+      "passes": true
     }
   ]
 }
