@@ -70,7 +70,7 @@
         "Check ClaudeRunOptions interface is defined"
       ],
       "verification": "test -f src/services/Claude.ts && grep -q 'Context.Tag' src/services/Claude.ts && grep -q 'readonly run' src/services/Claude.ts && grep -q 'readonly runWithEvents' src/services/Claude.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-016",
