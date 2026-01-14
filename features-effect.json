@@ -1,0 +1,142 @@
+{
+  "features": [
+    {
+      "id": "effect-001-dependencies",
+      "description": "Install Effect dependencies: effect, @effect/platform, @effect/platform-bun, @effect/schema. Update package.json with these dependencies.",
+      "passes": true,
+      "verify_command": "grep -q '\"effect\"' package.json && grep -q '@effect/platform' package.json && grep -q '@effect/platform-bun' package.json"
+    },
+    {
+      "id": "effect-002-errors",
+      "description": "Create src/errors/index.ts with all tagged error types: ConfigError, DockerError, ContainerNotFoundError, ClaudeError, TimeoutError, GitError, FeatureError, CircuitBreakerError, StreamError, ValidationError. Each extends Data.TaggedError with appropriate fields per specs/effect-errors.md.",
+      "passes": false,
+      "verify_command": "test -f src/errors/index.ts && grep -q 'Data.TaggedError' src/errors/index.ts && grep -q 'DockerError' src/errors/index.ts && grep -q 'TimeoutError' src/errors/index.ts"
+    },
+    {
+      "id": "effect-003-config-service",
+      "description": "Create src/services/Config.ts with ConfigService interface per specs/effect-services.md. Define Context.Tag with oauthToken, githubToken, gitRoot, featuresPath, branch, maxIterations, dashboardPort, timeoutMs, once, stepMode, dashboardEnabled fields.",
+      "passes": false,
+      "verify_command": "test -f src/services/Config.ts && grep -q 'Context.Tag' src/services/Config.ts && grep -q 'ConfigService' src/services/Config.ts"
+    },
+    {
+      "id": "effect-004-docker-service",
+      "description": "Create src/services/Docker.ts with DockerService interface per specs/effect-services.md. Define methods: create, start, exec, execStream, inspect, remove, listByPrefix, copyToContainer, readFile, writeFile.",
+      "passes": false,
+      "verify_command": "test -f src/services/Docker.ts && grep -q 'Context.Tag' src/services/Docker.ts && grep -q 'DockerService' src/services/Docker.ts && grep -q 'execStream' src/services/Docker.ts"
+    },
+    {
+      "id": "effect-005-claude-service",
+      "description": "Create src/services/Claude.ts with ClaudeService interface per specs/effect-services.md. Define run and runWithEvents methods that return Effect and Stream respectively.",
+      "passes": false,
+      "verify_command": "test -f src/services/Claude.ts && grep -q 'Context.Tag' src/services/Claude.ts && grep -q 'ClaudeService' src/services/Claude.ts && grep -q 'runWithEvents' src/services/Claude.ts"
+    },
+    {
+      "id": "effect-006-git-service",
+      "description": "Create src/services/Git.ts with GitService interface per specs/effect-services.md. Define checkout, fetch, push, hasUnpushedCommits, createBranch, configureUser methods.",
+      "passes": false,
+      "verify_command": "test -f src/services/Git.ts && grep -q 'Context.Tag' src/services/Git.ts && grep -q 'GitService' src/services/Git.ts && grep -q 'hasUnpushedCommits' src/services/Git.ts"
+    },
+    {
+      "id": "effect-007-dashboard-service",
+      "description": "Create src/services/Dashboard.ts with DashboardService interface per specs/effect-services.md. Define getState, updateState, setPaused, setRunning, setStopping, setIteration, setFeatures, broadcast, sendOutput, start, stop methods.",
+      "passes": false,
+      "verify_command": "test -f src/services/Dashboard.ts && grep -q 'Context.Tag' src/services/Dashboard.ts && grep -q 'DashboardService' src/services/Dashboard.ts && grep -q 'broadcast' src/services/Dashboard.ts"
+    },
+    {
+      "id": "effect-008-ndjson-stream",
+      "description": "Create src/streams/ndjson.ts with parseNDJSON, parseNDJSONWithFallback, fromReadableStream, collectAll, forEach functions per specs/effect-streams.md. Use Stream.decodeText, Stream.splitLines, Stream.mapEffect for JSON parsing.",
+      "passes": false,
+      "verify_command": "test -f src/streams/ndjson.ts && grep -q 'parseNDJSON' src/streams/ndjson.ts && grep -q 'Stream.splitLines' src/streams/ndjson.ts"
+    },
+    {
+      "id": "effect-009-config-layer",
+      "description": "Create src/layers/ConfigLive.ts implementing ConfigService. Use Effect Config for environment variables with validation. Accept CLI args and merge with env config. Export makeConfigLive function.",
+      "passes": false,
+      "verify_command": "test -f src/layers/ConfigLive.ts && grep -q 'Layer' src/layers/ConfigLive.ts && grep -q 'ConfigService' src/layers/ConfigLive.ts && grep -q 'makeConfigLive' src/layers/ConfigLive.ts"
+    },
+    {
+      "id": "effect-010-docker-layer",
+      "description": "Create src/layers/DockerLive.ts implementing DockerService. Use @effect/platform Command module for all docker commands. Handle errors with DockerError and ContainerNotFoundError.",
+      "passes": false,
+      "verify_command": "test -f src/layers/DockerLive.ts && grep -q 'Layer' src/layers/DockerLive.ts && grep -q 'Command' src/layers/DockerLive.ts && grep -q 'DockerService' src/layers/DockerLive.ts"
+    },
+    {
+      "id": "effect-011-git-layer",
+      "description": "Create src/layers/GitLive.ts implementing GitService. Use DockerService to execute git commands inside the container. Map errors to GitError type.",
+      "passes": false,
+      "verify_command": "test -f src/layers/GitLive.ts && grep -q 'Layer' src/layers/GitLive.ts && grep -q 'GitService' src/layers/GitLive.ts && grep -q 'DockerService' src/layers/GitLive.ts"
+    },
+    {
+      "id": "effect-012-claude-layer",
+      "description": "Create src/layers/ClaudeLive.ts implementing ClaudeService. Use DockerService for exec, parseNDJSON for stream parsing. Handle timeouts with Effect.timeout.",
+      "passes": false,
+      "verify_command": "test -f src/layers/ClaudeLive.ts && grep -q 'Layer' src/layers/ClaudeLive.ts && grep -q 'ClaudeService' src/layers/ClaudeLive.ts && grep -q 'parseNDJSON' src/layers/ClaudeLive.ts"
+    },
+    {
+      "id": "effect-013-dashboard-layer",
+      "description": "Create src/layers/DashboardLive.ts implementing DashboardService. Use Effect Ref for state management. Keep Bun.serve for SSE server. Use Layer.scoped for resource cleanup.",
+      "passes": false,
+      "verify_command": "test -f src/layers/DashboardLive.ts && grep -q 'Layer.scoped' src/layers/DashboardLive.ts && grep -q 'Ref' src/layers/DashboardLive.ts && grep -q 'DashboardService' src/layers/DashboardLive.ts"
+    },
+    {
+      "id": "effect-014-layer-composition",
+      "description": "Create src/layers/index.ts exporting MainLive layer composition. Compose all layers with proper dependency order using Layer.mergeAll and Layer.provideMerge.",
+      "passes": false,
+      "verify_command": "test -f src/layers/index.ts && grep -q 'MainLive' src/layers/index.ts && grep -q 'Layer.mergeAll' src/layers/index.ts"
+    },
+    {
+      "id": "effect-015-main-program",
+      "description": "Create src/program.ts with main orchestration Effect. Implement createSession, runIteration, and mainLoop using Effect.gen and Effect.iterate. Use services via yield* for type-safe dependency injection.",
+      "passes": false,
+      "verify_command": "test -f src/program.ts && grep -q 'Effect.gen' src/program.ts && grep -q 'mainLoop' src/program.ts && grep -q 'DockerService' src/program.ts"
+    },
+    {
+      "id": "effect-016-entry-point",
+      "description": "Create src/main.ts as the new entry point. Use BunRuntime.runMain to execute mainLoop with MainLive layer. Handle top-level errors with Effect.catchTags.",
+      "passes": false,
+      "verify_command": "test -f src/main.ts && grep -q 'BunRuntime' src/main.ts && grep -q 'MainLive' src/main.ts && grep -q 'runMain' src/main.ts"
+    },
+    {
+      "id": "effect-017-error-tests",
+      "description": "Create src/errors/index.test.ts with tests for all error types. Verify _tag discriminator, catchTag matching, and error context preservation.",
+      "passes": false,
+      "verify_command": "test -f src/errors/index.test.ts && bun test src/errors/index.test.ts"
+    },
+    {
+      "id": "effect-018-stream-tests",
+      "description": "Create src/streams/ndjson.test.ts with tests for parseNDJSON. Test valid NDJSON parsing, empty line handling, invalid JSON errors, and fallback behavior.",
+      "passes": false,
+      "verify_command": "test -f src/streams/ndjson.test.ts && bun test src/streams/ndjson.test.ts"
+    },
+    {
+      "id": "effect-019-service-tests",
+      "description": "Create test layers in src/layers/test/ directory: ConfigTest.ts, DockerTest.ts, ClaudeTest.ts, GitTest.ts, DashboardTest.ts. These provide mock implementations for testing.",
+      "passes": false,
+      "verify_command": "test -d src/layers/test && test -f src/layers/test/DockerTest.ts && grep -q 'Layer.succeed' src/layers/test/DockerTest.ts"
+    },
+    {
+      "id": "effect-020-integration-test",
+      "description": "Create src/program.test.ts with integration tests using test layers. Test mainLoop completes when all features pass, circuit breaker triggers after 3 no-change iterations, and timeout handling.",
+      "passes": false,
+      "verify_command": "test -f src/program.test.ts && bun test src/program.test.ts"
+    },
+    {
+      "id": "effect-021-update-ralph-ts",
+      "description": "Update ralph.ts to be a thin wrapper that imports and runs src/main.ts. Keep backwards compatibility for CLI usage. The ralph.ts file should delegate to the Effect-based implementation.",
+      "passes": false,
+      "verify_command": "grep -q 'import' ralph.ts && grep -q 'main' ralph.ts"
+    },
+    {
+      "id": "effect-022-update-claude-md",
+      "description": "Update CLAUDE.md to document the new Effect architecture. Add Effect patterns section explaining services, layers, errors, and streams. Update file locations table.",
+      "passes": false,
+      "verify_command": "grep -q 'Effect' CLAUDE.md && grep -q 'Layer' CLAUDE.md"
+    },
+    {
+      "id": "effect-023-all-tests-pass",
+      "description": "Ensure all tests pass: bun test. This verifies the complete Effect migration is working correctly.",
+      "passes": false,
+      "verify_command": "bun test"
+    }
+  ]
+}
