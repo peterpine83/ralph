@@ -153,11 +153,25 @@ See `src/args.ts` for parsing logic.
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `[features.json]` | `features.json` | Path to features file |
-| `--branch <name>` | auto-generated | Resume existing branch |
+| `--branch <name>` | `ralph/MMDD-HHMM-{feature}` | Resume existing branch |
 | `--once` | `false` | Run single iteration only |
 | `--max-iterations <n>` | `5` | Maximum loop iterations |
 | `--dashboard` | `false` | Enable web dashboard |
 | `--dashboard-port <n>` | `3847` | Dashboard server port |
+
+### Branch Naming
+
+Auto-generated branch names follow the format: `ralph/MMDD-HHMM-{feature-slug}`
+
+- `MMDD` - Month and day (e.g., `0114` for January 14th)
+- `HHMM` - Hour and minute in 24h format (e.g., `1435` for 2:35 PM)
+- `{feature-slug}` - First feature ID, truncated to 25 characters
+
+**Examples:**
+- `ralph/0114-1435-add-login-button`
+- `ralph/0115-0930-implement-dark-mode`
+
+This format makes branches easy to sort chronologically while showing what each session is working on.
 
 ### Environment Variables
 
