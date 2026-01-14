@@ -5,10 +5,10 @@ describe("parseArgs", () => {
   test("returns defaults when no args provided", () => {
     const result = parseArgs([])
     expect(result).toEqual({
-      featuresPath: "features.json",
+      featuresPath: ".ralph/features.json",
       branch: undefined,
       once: false,
-      maxIterations: 5,
+      maxIterations: 50,
       dashboard: false,
       dashboardPort: 3847,
       step: false,
@@ -78,7 +78,7 @@ describe("parseArgs", () => {
 
   test("ignores --max-iterations without value", () => {
     const result = parseArgs(["--max-iterations"])
-    expect(result.maxIterations).toBe(5) // default
+    expect(result.maxIterations).toBe(50) // default
   })
 
   test("parses NaN max-iterations as NaN", () => {
