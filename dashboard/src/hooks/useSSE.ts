@@ -44,5 +44,17 @@ export function useSSE(onEvent: (event: DashboardEvent) => void) {
     await fetch("/resume", { method: "POST" })
   }, [])
 
-  return { pause, resume }
+  const setStepMode = useCallback(async (enabled: boolean) => {
+    await fetch("/step-mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    })
+  }, [])
+
+  const stop = useCallback(async () => {
+    await fetch("/stop", { method: "POST" })
+  }, [])
+
+  return { pause, resume, setStepMode, stop }
 }

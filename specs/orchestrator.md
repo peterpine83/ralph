@@ -145,6 +145,51 @@ if (hasUnpushedCommits(gitLogOutput)) {
 }
 ```
 
+## Step Mode
+
+Pause after each iteration for tuning and review. Useful for observing Claude's behavior and adjusting prompts.
+
+### Enabling Step Mode
+- **CLI**: `bun ralph.ts --step features.json`
+- **Dashboard**: Toggle "Step" checkbox at runtime
+
+### Post-Iteration Checkpoint
+After Claude completes and commits are pushed:
+1. If step mode enabled → set `paused = true`
+2. Show CLI prompt: `[c]ontinue, [s]top`
+3. Wait for user input OR dashboard resume
+4. Continue or break based on response
+
+```typescript
+if (shouldStep && !once) {
+  console.log("Step mode: Iteration complete")
+  // Wait for CLI input or dashboard resume
+  const action = await promptForAction()
+  if (action === "stop") break
+}
+```
+
+## Signal Handling
+
+Graceful shutdown via Ctrl+C or dashboard stop button.
+
+### Shutdown Flow
+1. First SIGINT/SIGTERM → set `stopping = true`, wait for Claude to finish
+2. Second signal → force exit immediately
+3. Always run cleanup (container removal) in finally block
+
+### State Variables
+```typescript
+let shutdownRequested = false  // CLI signal received
+
+// In signal handler:
+if (shutdownRequested) {
+  process.exit(1)  // Force exit on second signal
+}
+shutdownRequested = true
+setStopping(true)  // Update dashboard state
+```
+
 ## Configuration
 
 ### CLI Arguments
@@ -156,6 +201,7 @@ See `src/args.ts` for parsing logic.
 | `--branch <name>` | auto-generated | Resume existing branch |
 | `--once` | `false` | Run single iteration only |
 | `--max-iterations <n>` | `5` | Maximum loop iterations |
+| `--step` | `false` | Pause after each iteration for review |
 | `--dashboard` | `false` | Enable web dashboard |
 | `--dashboard-port <n>` | `3847` | Dashboard server port |
 
@@ -187,6 +233,9 @@ Managed by `src/server.ts`, broadcast via SSE:
 interface DashboardState {
   paused: boolean
   running: boolean
+  stepMode: boolean      // Pause after each iteration
+  stopping: boolean      // Graceful shutdown requested
+  claudeRunning: boolean // Claude process currently active
   containerName: string
   branch: string
   features: Feature[]

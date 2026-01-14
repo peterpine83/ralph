@@ -10,6 +10,9 @@ export interface Feature {
 export interface DashboardState {
   paused: boolean
   running: boolean
+  stepMode: boolean
+  stopping: boolean
+  claudeRunning: boolean
   containerName: string
   branch: string
   iteration: number
@@ -24,6 +27,9 @@ export interface StateEvent {
   data: {
     paused: boolean
     running: boolean
+    stepMode: boolean
+    stopping: boolean
+    claudeRunning: boolean
     containerName: string
     branch: string
   }

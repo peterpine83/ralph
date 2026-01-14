@@ -18,6 +18,11 @@ import {
   sendOutput,
   sendClaudeEvent,
   isPaused,
+  isStepMode,
+  isStopping,
+  setStepMode,
+  setStopping,
+  setClaudeRunning,
   setPromptTemplate,
 } from "./src/server"
 import type { ClaudeEvent, Feature } from "./src/types"
@@ -28,6 +33,60 @@ const MAX_NO_CHANGE = 3           // Circuit breaker: 3 iterations with no git d
 // IMPORTANT: This script must be run from ~/ralph/ directory
 // The templates are resolved relative to this script's location
 const RALPH_HOME = import.meta.dir
+
+// === Signal Handling for Graceful Shutdown ===
+
+let shutdownRequested = false
+
+function setupSignalHandlers(dashboardEnabled: boolean): void {
+  const handleShutdown = () => {
+    if (shutdownRequested) {
+      // Second signal = force exit
+      console.log("\nForce shutdown - exiting immediately")
+      process.exit(1)
+    }
+    shutdownRequested = true
+    console.log("\nGraceful shutdown requested - waiting for Claude to finish...")
+    console.log("Press Ctrl+C again to force exit")
+    // Update dashboard state if running
+    if (dashboardEnabled) {
+      setStopping(true)
+    }
+  }
+
+  process.on("SIGINT", handleShutdown)
+  process.on("SIGTERM", handleShutdown)
+}
+
+// === Interactive CLI Prompt ===
+
+async function promptForAction(): Promise<"continue" | "stop"> {
+  process.stdout.write("\n[c]ontinue, [s]top: ")
+
+  const stdin = Bun.stdin.stream()
+  const reader = stdin.getReader()
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) return "stop"
+
+      const input = new TextDecoder().decode(value).trim().toLowerCase()
+
+      if (input === "c" || input === "continue" || input === "") {
+        console.log("Continuing...")
+        return "continue"
+      }
+      if (input === "s" || input === "stop") {
+        console.log("Stopping...")
+        return "stop"
+      }
+      process.stdout.write("[c]ontinue, [s]top: ")
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
 
 // === Cleanup and Error Handling ===
 
@@ -221,7 +280,10 @@ async function runClaudeInContainer(
 }
 
 async function main(): Promise<void> {
-  const { featuresPath, branch: resumeBranch, once, maxIterations, dashboard, dashboardPort } = parseArgs(process.argv.slice(2))
+  const { featuresPath, branch: resumeBranch, once, maxIterations, dashboard, dashboardPort, step } = parseArgs(process.argv.slice(2))
+
+  // Setup signal handlers for graceful shutdown
+  setupSignalHandlers(dashboard)
 
   // Cleanup any stale containers from previous sessions
   await cleanupStaleContainers()
@@ -278,6 +340,7 @@ async function main(): Promise<void> {
     const dashboardPath = `${RALPH_HOME}/dashboard/dist/index.html`
     startDashboardServer(dashboardPort, dashboardPath)
     setPromptTemplate(instructions)
+    setStepMode(step)  // Initialize step mode from CLI flag
     updateState({
       running: true,
       containerName,
@@ -285,18 +348,28 @@ async function main(): Promise<void> {
     })
   }
 
+  // Track step mode locally for non-dashboard mode
+  let stepModeEnabled = step
+
   let iteration = 0
   let noChangeCount = 0
 
   try {
     // Main loop
     while (true) {
+      // Check for graceful shutdown request
+      if (shutdownRequested || (dashboard && isStopping())) {
+        console.log("\n=== Graceful shutdown - exiting ===")
+        break
+      }
+
       // Check for pause (dashboard control)
       if (dashboard && isPaused()) {
         console.log("Paused - waiting for resume...")
-        while (isPaused()) {
+        while (isPaused() && !isStopping()) {
           await Bun.sleep(500)
         }
+        if (isStopping()) break
         console.log("Resumed")
       }
 
@@ -346,12 +419,14 @@ ${instructions}
 PROMPT_EOF`}`
 
       // Run Claude inside container
+      if (dashboard) setClaudeRunning(true)
       const success = await runClaudeInContainer(
         containerName,
         `Read .ralph-prompt.md and follow the instructions.`,
         TIMEOUT_MS,
         dashboard
       )
+      if (dashboard) setClaudeRunning(false)
 
       if (!success) {
         noChangeCount++
@@ -377,6 +452,42 @@ PROMPT_EOF`}`
         }
       } else {
         noChangeCount = 0
+      }
+
+      // === Post-iteration checkpoint for step mode ===
+      const shouldStep = dashboard ? isStepMode() : stepModeEnabled
+
+      if (shouldStep && !once) {
+        console.log("\n=== Step mode: Iteration complete ===")
+
+        if (dashboard) {
+          // In dashboard mode, set paused and accept CLI or dashboard resume
+          updateState({ paused: true })
+          console.log("Paused - use dashboard or press [c]ontinue, [s]top")
+
+          // Race between CLI input and dashboard resume
+          const waitForResume = async (): Promise<"continue" | "stop"> => {
+            while (isPaused() && !isStopping()) {
+              await Bun.sleep(100)
+            }
+            return isStopping() ? "stop" : "continue"
+          }
+
+          const action = await Promise.race([promptForAction(), waitForResume()])
+
+          if (action === "stop" || isStopping()) {
+            console.log("\n=== Stopping at user request ===")
+            break
+          }
+          updateState({ paused: false })
+        } else {
+          // Non-dashboard mode: pure CLI prompt
+          const action = await promptForAction()
+          if (action === "stop") {
+            console.log("\n=== Stopping at user request ===")
+            break
+          }
+        }
       }
 
       if (once) {
