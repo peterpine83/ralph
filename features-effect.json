@@ -15,7 +15,7 @@
     {
       "id": "effect-003-config-service",
       "description": "Create src/services/Config.ts with ConfigService interface per specs/effect-services.md. Define Context.Tag with oauthToken, githubToken, gitRoot, featuresPath, branch, maxIterations, dashboardPort, timeoutMs, once, stepMode, dashboardEnabled fields.",
-      "passes": false,
+      "passes": true,
       "verify_command": "test -f src/services/Config.ts && grep -q 'Context.Tag' src/services/Config.ts && grep -q 'ConfigService' src/services/Config.ts"
     },
     {
