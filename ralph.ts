@@ -5,14 +5,10 @@
 import { parseArgs } from "./src/args"
 import {
   generateContainerName,
-  buildDockerCreateArgs,
-  buildCopyCommand,
-  buildGitCheckoutCommand,
   parseStaleContainers,
   parseContainerRunning,
   getRemainingFeatures,
   hasUnpushedCommits,
-  type SessionConfig,
 } from "./src/container"
 import {
   startDashboardServer,
@@ -24,44 +20,43 @@ import {
   isPaused,
   setPromptTemplate,
 } from "./src/server"
-import type { ClaudeEvent } from "./src/types"
-import type { Feature } from "./src/types"
+import type { ClaudeEvent, Feature } from "./src/types"
 
-const TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes per iteration
-const MAX_NO_CHANGE = 3;            // Circuit breaker: 3 iterations with no git diff
+const TIMEOUT_MS = 5 * 60 * 1000  // 5 minutes per iteration
+const MAX_NO_CHANGE = 3           // Circuit breaker: 3 iterations with no git diff
 
 // IMPORTANT: This script must be run from ~/ralph/ directory
 // The templates are resolved relative to this script's location
-const RALPH_HOME = import.meta.dir;
+const RALPH_HOME = import.meta.dir
 
 // === Cleanup and Error Handling ===
 
 async function cleanupStaleContainers(): Promise<void> {
-  const stale = await Bun.$`docker ps -a --filter name=ralph-session --format "{{.Names}}"`.text();
+  const stale = await Bun.$`docker ps -a --filter name=ralph-session --format "{{.Names}}"`.text()
   for (const name of parseStaleContainers(stale)) {
-    console.log(`Cleaning up stale container: ${name}`);
-    await Bun.$`docker rm -f ${name}`.quiet().nothrow();
+    console.log(`Cleaning up stale container: ${name}`)
+    await Bun.$`docker rm -f ${name}`.quiet().nothrow()
   }
 }
 
 async function ensureContainerRunning(containerName: string): Promise<boolean> {
-  const isRunning = await Bun.$`docker inspect -f '{{.State.Running}}' ${containerName}`.text().catch(() => "false");
+  const isRunning = await Bun.$`docker inspect -f '{{.State.Running}}' ${containerName}`.text().catch(() => "false")
   if (!parseContainerRunning(isRunning)) {
-    console.log("Container stopped unexpectedly, restarting...");
-    const result = await Bun.$`docker start ${containerName}`.nothrow();
-    return result.exitCode === 0;
+    console.log("Container stopped unexpectedly, restarting...")
+    const result = await Bun.$`docker start ${containerName}`.nothrow()
+    return result.exitCode === 0
   }
-  return true;
+  return true
 }
 
 // === Container Lifecycle Management ===
 
 async function createSession(gitRoot: string, branch: string, isResume: boolean): Promise<string> {
-  const containerName = generateContainerName();
+  const containerName = generateContainerName()
 
   // Get GitHub token for private repo access (needed for resume/push)
   const githubToken = process.env.GITHUB_TOKEN ||
-    await Bun.$`gh auth token`.text().catch(() => "");
+    await Bun.$`gh auth token`.text().catch(() => "")
 
   // Create container (does not start it)
   await Bun.$`docker create \
@@ -76,53 +71,53 @@ async function createSession(gitRoot: string, branch: string, isResume: boolean)
     -e GIT_AUTHOR_EMAIL=${process.env.GIT_AUTHOR_EMAIL || 'ralph@localhost'} \
     -w /workspace \
     ralph-base:latest \
-    sleep infinity`;
+    sleep infinity`
 
   // Start container (runs entrypoint with firewall init)
-  await Bun.$`docker start ${containerName}`;
+  await Bun.$`docker start ${containerName}`
 
   // Wait for entrypoint to complete (firewall init + git setup)
   // The entrypoint prints "=== Ralph Firewall Ready ===" when done
-  console.log("Waiting for container initialization...");
+  console.log("Waiting for container initialization...")
   for (let i = 0; i < 30; i++) {
-    const logs = await Bun.$`docker logs ${containerName} 2>&1`.text();
-    if (logs.includes("Ralph Firewall Ready")) break;
-    await Bun.sleep(1000);
+    const logs = await Bun.$`docker logs ${containerName} 2>&1`.text()
+    if (logs.includes("Ralph Firewall Ready")) break
+    await Bun.sleep(1000)
   }
 
   // Copy project into container (exclude macOS AppleDouble files)
   // COPYFILE_DISABLE=1 prevents macOS tar from including resource forks (._* files)
-  console.log("Copying project into container...");
-  await Bun.$`COPYFILE_DISABLE=1 tar -C ${gitRoot} --exclude='._*' --exclude='.DS_Store' -cf - . | docker exec -i ${containerName} tar -xf - -C /workspace`;
+  console.log("Copying project into container...")
+  await Bun.$`COPYFILE_DISABLE=1 tar -C ${gitRoot} --exclude='._*' --exclude='.DS_Store' -cf - . | docker exec -i ${containerName} tar -xf - -C /workspace`
 
   // Fix ownership - files are extracted as root, but node user needs write access
-  await Bun.$`docker exec ${containerName} chown -R node:node /workspace`;
+  await Bun.$`docker exec ${containerName} chown -R node:node /workspace`
 
   // Fix git ownership issues (files copied as root, git runs as node)
   // Use --system config (not --global) since .gitconfig is mounted read-only
-  await Bun.$`docker exec ${containerName} git config --system --add safe.directory /workspace`;
+  await Bun.$`docker exec ${containerName} git config --system --add safe.directory /workspace`
 
   // Ensure git credential helper is configured (in case entrypoint didn't run it)
   if (githubToken.trim()) {
-    await Bun.$`docker exec ${containerName} git config --system credential.helper '!gh auth git-credential'`;
+    await Bun.$`docker exec ${containerName} git config --system credential.helper '!gh auth git-credential'`
   }
 
   if (isResume) {
     // Fetch and checkout existing branch from remote
-    console.log(`Resuming branch: ${branch}`);
-    await Bun.$`docker exec -u node ${containerName} git fetch origin ${branch}`;
-    await Bun.$`docker exec -u node ${containerName} git checkout -B ${branch} origin/${branch}`;
+    console.log(`Resuming branch: ${branch}`)
+    await Bun.$`docker exec -u node ${containerName} git fetch origin ${branch}`
+    await Bun.$`docker exec -u node ${containerName} git checkout -B ${branch} origin/${branch}`
   } else {
     // Create new branch
-    await Bun.$`docker exec -u node ${containerName} git checkout -b ${branch}`;
+    await Bun.$`docker exec -u node ${containerName} git checkout -b ${branch}`
   }
 
-  return containerName;
+  return containerName
 }
 
 async function cleanupSession(containerName: string): Promise<void> {
-  console.log(`Cleaning up container: ${containerName}`);
-  await Bun.$`docker rm -f ${containerName}`.quiet().nothrow();
+  console.log(`Cleaning up container: ${containerName}`)
+  await Bun.$`docker rm -f ${containerName}`.quiet().nothrow()
 }
 
 async function runClaudeInContainer(
@@ -225,15 +220,7 @@ async function runClaudeInContainer(
   }
 }
 
-// Helper: append to progress log (orchestrator-side logging)
-async function log(gitRoot: string, message: string) {
-  const timestamp = new Date().toISOString();
-  const line = `[${timestamp}] ${message}\n`;
-  console.log(line.trim());
-  // Note: Claude also writes to ralph-progress.txt, orchestrator logs to console
-}
-
-async function main() {
+async function main(): Promise<void> {
   const { featuresPath, branch: resumeBranch, once, maxIterations, dashboard, dashboardPort } = parseArgs(process.argv.slice(2))
 
   // Cleanup any stale containers from previous sessions
@@ -241,37 +228,37 @@ async function main() {
 
   // Validate environment
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    console.error("ERROR: CLAUDE_CODE_OAUTH_TOKEN not set");
-    process.exit(1);
+    console.error("ERROR: CLAUDE_CODE_OAUTH_TOKEN not set")
+    process.exit(1)
   }
 
   // Find git root (still needed for initial copy)
-  const gitRoot = (await Bun.$`git rev-parse --show-toplevel`.text()).trim();
+  const gitRoot = (await Bun.$`git rev-parse --show-toplevel`.text()).trim()
   if (!gitRoot) {
-    console.error("ERROR: Not in a git repository");
-    process.exit(1);
+    console.error("ERROR: Not in a git repository")
+    process.exit(1)
   }
 
   // Verify features.json exists
-  const featuresFile = Bun.file(`${gitRoot}/${featuresPath}`);
+  const featuresFile = Bun.file(`${gitRoot}/${featuresPath}`)
   if (!await featuresFile.exists()) {
-    console.error(`ERROR: Features file not found: ${featuresPath}`);
-    process.exit(1);
+    console.error(`ERROR: Features file not found: ${featuresPath}`)
+    process.exit(1)
   }
 
   // Determine branch name and detect resume mode
-  const branch = resumeBranch || `ralph/${Date.now()}`;
-  let isResume = false;
+  const branch = resumeBranch || `ralph/${Date.now()}`
+  let isResume = false
 
   if (resumeBranch) {
     // Check if branch exists on remote
-    const remoteBranch = await Bun.$`git ls-remote --heads origin ${resumeBranch}`.text();
+    const remoteBranch = await Bun.$`git ls-remote --heads origin ${resumeBranch}`.text()
     if (remoteBranch.trim()) {
-      isResume = true;
-      console.log(`Found existing branch on remote: ${resumeBranch}`);
+      isResume = true
+      console.log(`Found existing branch on remote: ${resumeBranch}`)
     } else {
-      console.error(`ERROR: Branch not found on remote: ${resumeBranch}`);
-      process.exit(1);
+      console.error(`ERROR: Branch not found on remote: ${resumeBranch}`)
+      process.exit(1)
     }
   }
 
@@ -367,34 +354,34 @@ PROMPT_EOF`}`
       )
 
       if (!success) {
-        noChangeCount++;
+        noChangeCount++
         if (noChangeCount >= MAX_NO_CHANGE) {
-          console.log("CIRCUIT BREAKER: No progress after timeouts");
-          process.stdout.write("\x07");
-          break;
+          console.log("CIRCUIT BREAKER: No progress after timeouts")
+          process.stdout.write("\x07")
+          break
         }
-        continue;
+        continue
       }
 
       // Check if Claude pushed (verify via git log)
-      const pushCheck = await Bun.$`docker exec -u node ${containerName} git log origin/${branch}..HEAD --oneline`.text().catch(() => "");
+      const pushCheck = await Bun.$`docker exec -u node ${containerName} git log origin/${branch}..HEAD --oneline`.text().catch(() => "")
       if (hasUnpushedCommits(pushCheck)) {
-        console.log("WARNING: Unpushed commits detected - attempting to push...");
-        const pushResult = await Bun.$`docker exec -u node ${containerName} git push`.nothrow();
+        console.log("WARNING: Unpushed commits detected - attempting to push...")
+        const pushResult = await Bun.$`docker exec -u node ${containerName} git push`.nothrow()
         if (pushResult.exitCode !== 0) {
-          console.log("WARNING: Push failed - may need manual intervention");
-          noChangeCount++;
+          console.log("WARNING: Push failed - may need manual intervention")
+          noChangeCount++
         } else {
-          console.log("Push succeeded (orchestrator retry)");
-          noChangeCount = 0;
+          console.log("Push succeeded (orchestrator retry)")
+          noChangeCount = 0
         }
       } else {
-        noChangeCount = 0;
+        noChangeCount = 0
       }
 
       if (once) {
-        console.log("\n=== Single iteration complete (--once flag) ===");
-        break;
+        console.log("\n=== Single iteration complete (--once flag) ===")
+        break
       }
     }
   } finally {
@@ -409,4 +396,4 @@ PROMPT_EOF`}`
   console.log(`\nTo view PR: gh pr view ${branch}`)
 }
 
-main().catch(console.error);
+main().catch(console.error)

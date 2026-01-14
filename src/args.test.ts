@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { parseArgs } from "./args";
+import { describe, expect, test } from "bun:test"
+import { parseArgs } from "./args"
 
 describe("parseArgs", () => {
   test("returns defaults when no args provided", () => {
-    const result = parseArgs([]);
+    const result = parseArgs([])
     expect(result).toEqual({
       featuresPath: "features.json",
       branch: undefined,
@@ -11,28 +11,28 @@ describe("parseArgs", () => {
       maxIterations: 5,
       dashboard: false,
       dashboardPort: 3847,
-    });
-  });
+    })
+  })
 
   test("parses custom features path (positional arg)", () => {
-    const result = parseArgs(["my-features.json"]);
-    expect(result.featuresPath).toBe("my-features.json");
-  });
+    const result = parseArgs(["my-features.json"])
+    expect(result.featuresPath).toBe("my-features.json")
+  })
 
   test("parses --branch flag", () => {
-    const result = parseArgs(["--branch", "ralph/123"]);
-    expect(result.branch).toBe("ralph/123");
-  });
+    const result = parseArgs(["--branch", "ralph/123"])
+    expect(result.branch).toBe("ralph/123")
+  })
 
   test("parses --once flag", () => {
-    const result = parseArgs(["--once"]);
-    expect(result.once).toBe(true);
-  });
+    const result = parseArgs(["--once"])
+    expect(result.once).toBe(true)
+  })
 
   test("parses --max-iterations flag", () => {
-    const result = parseArgs(["--max-iterations", "10"]);
-    expect(result.maxIterations).toBe(10);
-  });
+    const result = parseArgs(["--max-iterations", "10"])
+    expect(result.maxIterations).toBe(10)
+  })
 
   test("parses all flags together", () => {
     const result = parseArgs([
@@ -40,7 +40,7 @@ describe("parseArgs", () => {
       "--branch", "ralph/feature-branch",
       "--once",
       "--max-iterations", "20",
-    ]);
+    ])
     expect(result).toEqual({
       featuresPath: "custom.json",
       branch: "ralph/feature-branch",
@@ -48,8 +48,8 @@ describe("parseArgs", () => {
       maxIterations: 20,
       dashboard: false,
       dashboardPort: 3847,
-    });
-  });
+    })
+  })
 
   test("handles flags in any order", () => {
     const result = parseArgs([
@@ -57,7 +57,7 @@ describe("parseArgs", () => {
       "--max-iterations", "3",
       "features.json",
       "--branch", "my-branch",
-    ]);
+    ])
     expect(result).toEqual({
       featuresPath: "features.json",
       branch: "my-branch",
@@ -65,37 +65,37 @@ describe("parseArgs", () => {
       maxIterations: 3,
       dashboard: false,
       dashboardPort: 3847,
-    });
-  });
+    })
+  })
 
   test("ignores --branch without value", () => {
-    const result = parseArgs(["--branch"]);
-    expect(result.branch).toBeUndefined();
-  });
+    const result = parseArgs(["--branch"])
+    expect(result.branch).toBeUndefined()
+  })
 
   test("ignores --max-iterations without value", () => {
-    const result = parseArgs(["--max-iterations"]);
-    expect(result.maxIterations).toBe(5); // default
-  });
+    const result = parseArgs(["--max-iterations"])
+    expect(result.maxIterations).toBe(5) // default
+  })
 
   test("parses NaN max-iterations as NaN", () => {
-    const result = parseArgs(["--max-iterations", "not-a-number"]);
-    expect(result.maxIterations).toBeNaN();
-  });
+    const result = parseArgs(["--max-iterations", "not-a-number"])
+    expect(result.maxIterations).toBeNaN()
+  })
 
   test("parses --dashboard flag", () => {
-    const result = parseArgs(["--dashboard"]);
-    expect(result.dashboard).toBe(true);
-  });
+    const result = parseArgs(["--dashboard"])
+    expect(result.dashboard).toBe(true)
+  })
 
   test("parses --dashboard-port flag", () => {
-    const result = parseArgs(["--dashboard-port", "8080"]);
-    expect(result.dashboardPort).toBe(8080);
-  });
+    const result = parseArgs(["--dashboard-port", "8080"])
+    expect(result.dashboardPort).toBe(8080)
+  })
 
   test("parses dashboard flags together", () => {
-    const result = parseArgs(["--dashboard", "--dashboard-port", "9000"]);
-    expect(result.dashboard).toBe(true);
-    expect(result.dashboardPort).toBe(9000);
-  });
-});
+    const result = parseArgs(["--dashboard", "--dashboard-port", "9000"])
+    expect(result.dashboard).toBe(true)
+    expect(result.dashboardPort).toBe(9000)
+  })
+})
