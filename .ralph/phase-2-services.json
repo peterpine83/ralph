@@ -96,7 +96,7 @@
         "Check all methods return Effect.Effect"
       ],
       "verification": "test -f src/services/Dashboard.ts && grep -q 'Context.Tag' src/services/Dashboard.ts && grep -q 'readonly getState' src/services/Dashboard.ts && grep -q 'readonly updateState' src/services/Dashboard.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-018",
@@ -109,7 +109,7 @@
         "Check DashboardEvent type is imported/used"
       ],
       "verification": "grep -q 'readonly broadcast' src/services/Dashboard.ts && grep -q 'readonly sendOutput' src/services/Dashboard.ts && grep -q 'readonly start' src/services/Dashboard.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-019",
