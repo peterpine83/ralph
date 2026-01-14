@@ -31,3 +31,6 @@ npm-debug.log*
 # Runtime files
 .ralph-prompt.md
 ralph-progress.txt
+
+# Thoughts (local session notes, not committed)
+thoughts/
