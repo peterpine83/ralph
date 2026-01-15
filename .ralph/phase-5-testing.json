@@ -57,7 +57,7 @@
         "Verify create/start/remove return Effect.succeed"
       ],
       "verification": "test -f src/layers/test/DockerTest.ts && grep -q 'Layer.succeed' src/layers/test/DockerTest.ts && grep -q 'DockerService' src/layers/test/DockerTest.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-045",

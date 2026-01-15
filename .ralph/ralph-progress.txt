@@ -86,3 +86,33 @@
   Git: Committed fcc4f68, pushed to origin ralph/0115-1208-effect-041
   PR: https://github.com/peterpine83/ralph/pull/17
 
+[2026-01-15 17:25] Completed: effect-044 - DockerTest mock layer
+  Implemented:
+    - Created src/layers/test/DockerTest.ts with Layer.succeed pattern
+    - Provides mock DockerService with all IDockerService methods
+    - exec() returns predictable responses based on command patterns (typecheck, test, git)
+    - All container operations (create/start/remove/inspect) return Effect.succeed
+    - execStream returns mock stdout/stderr streams
+    - File operations (readFile/writeFile/listByPrefix) return mock data
+
+  Decisions:
+    - Used Layer.succeed() directly with mockImplementation object
+    - Made exec() command-aware for realistic test scenarios
+    - Mock container IDs use "mock-container-id-{name}" pattern for traceability
+    - Empty stderr stream by default (Stream.empty) for success scenarios
+    - listByPrefix returns predictable array with prefix pattern
+
+  Learnings for next iteration:
+    - Mock services can be command-aware to simulate realistic behavior
+    - Stream.make() creates single-element streams for simple mock data
+    - Stream.empty is useful for simulating empty stderr in success cases
+    - IDockerService has 10 methods that all need mock implementations
+    - satisfies keyword ensures type safety for both service and data structures
+
+  CI Verification:
+    - bun run typecheck: PASSED
+    - bun test: PASSED (74 tests total)
+    - Feature verification: PASSED (file exists, Layer.succeed + DockerService present)
+
+  Suggested next: effect-045 (ClaudeTest, GitTest, DashboardTest) - completes test layer suite
+
