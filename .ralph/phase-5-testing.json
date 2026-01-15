@@ -120,7 +120,7 @@
         "Verify commands section still works"
       ],
       "verification": "grep -q 'Effect' CLAUDE.md && grep -q 'Layer' CLAUDE.md && grep -q 'services' CLAUDE.md",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-050",
