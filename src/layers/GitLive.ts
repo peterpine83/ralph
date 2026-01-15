@@ -124,7 +124,7 @@ export const makeGitLive = (containerName: string) =>
         configureUser: (name: string, email: string) =>
           Effect.gen(function* () {
             const mapConfigError = Effect.mapError(
-              (e: unknown) => new GitError({ operation: "status", cause: e })
+              (e: unknown) => new GitError({ operation: "config", cause: e })
             )
 
             yield* docker
