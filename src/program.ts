@@ -2,8 +2,10 @@
 import { Effect } from "effect"
 import { DockerService, type ContainerConfig } from "./services/Docker.js"
 import { ConfigService } from "./services/Config.js"
-import { generateContainerName, type SessionConfig } from "./container.js"
+import { generateContainerName, type SessionConfig, getRemainingFeatures } from "./container.js"
 import { DockerError } from "./errors/index.js"
+import { ClaudeService } from "./services/Claude.js"
+import { GitService } from "./services/Git.js"
 
 /**
  * Creates and initializes a new container session
@@ -193,4 +195,70 @@ export const createSession = (sessionConfig: SessionConfig) =>
 
     // Return the container name for use in subsequent operations
     return { containerName, containerId }
+  })
+
+/**
+ * Runs a single iteration of the orchestration loop
+ *
+ * Steps:
+ * 1. Read features.json from container
+ * 2. Check if there are remaining features to implement
+ * 3. Run Claude Code with the prompt
+ * 4. Check for git changes (unpushed commits)
+ * 5. Push changes if they exist
+ *
+ * Returns information about what happened in this iteration
+ */
+export const runIteration = (params: {
+  containerName: string
+  prompt: string
+}) =>
+  Effect.gen(function* () {
+    const docker = yield* DockerService
+    const claude = yield* ClaudeService
+    const git = yield* GitService
+
+    // 1. Read features.json from container
+    const featuresContent = yield* docker
+      .readFile(params.containerName, "/workspace/.ralph/features.json")
+      .pipe(
+        Effect.mapError(
+          (e) =>
+            new DockerError({
+              command: "readFile",
+              cause: e,
+            })
+        )
+      )
+
+    // 2. Check remaining features
+    const remainingFeatures = getRemainingFeatures(featuresContent)
+
+    // 3. Run Claude Code with the prompt
+    // Use a 10 minute timeout for Claude operations
+    yield* claude.run({
+      containerName: params.containerName,
+      prompt: params.prompt,
+      timeoutMs: 10 * 60 * 1000,
+      flags: {
+        dangerouslySkipPermissions: true,
+        verbose: true,
+        outputFormat: "stream-json",
+      },
+      user: "node",
+    })
+
+    // 4. Check for git changes (unpushed commits)
+    const hasChanges = yield* git.hasUnpushedCommits()
+
+    // 5. Push changes if they exist
+    if (hasChanges) {
+      yield* git.push({ setUpstream: true })
+    }
+
+    // Return iteration results
+    return {
+      remainingFeaturesCount: remainingFeatures.length,
+      gitChangesPushed: hasChanges,
+    }
   })
