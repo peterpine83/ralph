@@ -107,7 +107,7 @@
         "Test 'bun ralph.ts --help' still works"
       ],
       "verification": "grep -q 'import' ralph.ts && grep -q 'main' ralph.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-049",

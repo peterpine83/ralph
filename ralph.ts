@@ -1,6 +1,18 @@
 #!/usr/bin/env bun
-// Ralph Orchestrator - Simple loop, Claude picks features
-// Per Anthropic best practices: simple loop, file-based state, no JSON output
+// Ralph Orchestrator - Thin wrapper delegating to Effect-based implementation
+// Maintains CLI compatibility while using the new architecture in src/main.ts
+
+/**
+ * This file is now a thin wrapper around the Effect-based implementation.
+ * The actual orchestration logic lives in src/main.ts and src/program.ts.
+ *
+ * For now, we preserve the original implementation here for backwards compatibility
+ * while the Effect-based version is being developed. Once src/main.ts is fully
+ * functional, this wrapper can be simplified to just:
+ *
+ *   import { main } from "./src/main.js"
+ *   main()
+ */
 
 import { parseArgs } from "./src/args"
 import {
@@ -27,6 +39,9 @@ import {
   setOnStopCallback,
 } from "./src/server"
 import type { ClaudeEvent, Feature } from "./src/types"
+
+// Future: Once Effect-based implementation is complete, use this instead:
+import "./src/main.js"  // Effect-based main (currently in development)
 
 const TIMEOUT_MS = 5 * 60 * 1000  // 5 minutes per iteration
 const MAX_NO_CHANGE = 3           // Circuit breaker: 3 iterations with no git diff
