@@ -1,6 +1,6 @@
 # Features Specification
 
-**File Format**: `features.json`
+**File Format**: `.ralph/features.json`
 **Purpose**: Define work items for Claude to implement, with verification commands
 
 ## Schema
@@ -61,9 +61,13 @@ Boolean indicating completion status.
 **Workflow:**
 1. Start with `passes: false`
 2. Claude implements the feature
-3. Claude runs `verify_command` (if present)
-4. If verification passes, Claude sets `passes: true`
-5. Claude commits the change
+3. Claude runs full CI suite (typecheck, tests, build) — **mandatory**
+4. If CI fails, Claude fixes issues and reruns CI
+5. Claude runs `verify_command` (if present)
+6. If ALL checks pass, Claude sets `passes: true`
+7. Claude commits and pushes
+
+**CI Gate:** Claude cannot mark `passes: true` or proceed to the next feature until CI passes. This ensures each feature leaves the codebase in a working state.
 
 ### `verify_command` (optional)
 Bash command that exits 0 on success, non-zero on failure.
@@ -119,7 +123,7 @@ Bash command that exits 0 on success, non-zero on failure.
 
 ### 1. Read from Container
 ```bash
-docker exec <container> cat /workspace/features.json
+docker exec <container> cat /workspace/.ralph/features.json
 ```
 
 ### 2. Parse and Filter
@@ -156,12 +160,12 @@ When `getRemainingFeatures()` returns empty array:
 From `templates/ralph-instructions.md`:
 
 ```
-1. Read features.json to understand remaining work
+1. Read .ralph/features.json to understand remaining work
 2. Choose ONE feature to implement
 3. Implement the feature
 4. Run verify_command (if present)
 5. If verification passes:
-   - Set passes: true in features.json
+   - Set passes: true in .ralph/features.json
    - Commit: "Feature: {id} - {description}"
    - Push to branch
 6. EXIT (don't continue to next feature)

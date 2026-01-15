@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     gosu \
     openssh-client \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -40,9 +41,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 # If SSH keys are provided, users can configure git to use them.
 # RUN git config --global url."git@github.com:".insteadOf "https://github.com/"
 
-# Install Claude CLI via npm (latest version)
-# Note: Plan pinned to 1.0.3 but current API requires 1.0.24+
-RUN npm install -g @anthropic-ai/claude-code
+# Install Bun runtime (for projects that use bun as package manager)
+# Copy binaries to /usr/local/bin instead of symlinking from /root/.bun
+# because the container runs as non-root 'node' user who can't access /root/
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && \
+    cp /root/.bun/bin/bunx /usr/local/bin/bunx && \
+    chmod +x /usr/local/bin/bun /usr/local/bin/bunx
+
+# Install Claude CLI via native installer (recommended by Anthropic)
+# Copy binary to /usr/local/bin instead of symlinking from /root/.local/bin
+# because the container runs as non-root 'node' user who can't access /root/
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    cp /root/.local/bin/claude /usr/local/bin/claude && \
+    chmod +x /usr/local/bin/claude
 
 # Firewall script from Anthropic devcontainer (network isolation)
 COPY init-firewall.sh /usr/local/bin/
