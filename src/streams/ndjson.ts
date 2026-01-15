@@ -1,5 +1,5 @@
 // NDJSON stream parsing utilities
-import { Stream, Effect } from "effect"
+import { Stream, Effect, Chunk } from "effect"
 import { StreamError } from "../errors"
 
 /**
@@ -58,3 +58,44 @@ export const parseNDJSONWithFallback = <T>(
       }
     })
   )
+
+/**
+ * Convert a WHATWG ReadableStream to an Effect Stream.
+ *
+ * This wraps a browser/Node.js ReadableStream in Effect's Stream type,
+ * mapping any errors to StreamError.
+ */
+export const fromReadableStream = (
+  source: ReadableStream<Uint8Array>
+): Stream.Stream<Uint8Array, StreamError> =>
+  Stream.fromReadableStream(
+    () => source,
+    (error) =>
+      new StreamError({
+        streamType: "readable-stream",
+        message: "ReadableStream error",
+        cause: error
+      })
+  )
+
+/**
+ * Consume stream and collect all events into an array.
+ *
+ * This is useful when you need all values at once rather than processing them incrementally.
+ */
+export const collectAll = <T>(
+  source: Stream.Stream<T, StreamError>
+): Effect.Effect<T[], StreamError> =>
+  source.pipe(Stream.runCollect, Effect.map(Chunk.toArray))
+
+/**
+ * Consume stream with callback for each event.
+ *
+ * This processes each element with side effects without accumulating values.
+ * More memory-efficient than collectAll for large streams.
+ */
+export const forEach = <T>(
+  source: Stream.Stream<T, StreamError>,
+  callback: (event: T) => Effect.Effect<void>
+): Effect.Effect<void, StreamError> =>
+  source.pipe(Stream.tap(callback), Stream.runDrain)
