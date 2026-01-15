@@ -175,3 +175,62 @@
   Git: Committed dcd3574, pushed to origin ralph/0115-1208-effect-041
   PR: https://github.com/peterpine83/ralph/pull/17
 
+[2026-01-15 17:35] Completed: effect-046 - TestLive layer composition
+  Implemented:
+    - Created src/layers/test/index.ts with TestLive layer composition
+    - Used Layer.mergeAll to combine all 5 mock layers (ConfigTest, DockerTest, GitTest, ClaudeTest, DashboardTest)
+    - Added comprehensive documentation with usage example
+    - Re-exported all individual test layers for granular testing
+
+  Decisions:
+    - Used Layer.mergeAll() instead of Layer.provideMerge() since all test layers are foundational (no dependencies)
+    - Added JSDoc comment explaining that test layers have no dependency ordering
+    - Included usage example showing Effect.provide(TestLive) pattern
+    - Re-exported individual layers to mirror the MainLive pattern in src/layers/index.ts
+
+  Learnings for next iteration:
+    - TestLive composition is simpler than MainLive because mock layers don't enforce dependencies
+    - All test layers use Layer.succeed() without factory functions, unlike Live layers
+    - Layer.mergeAll() is the right choice when combining independent foundational layers
+    - The composition pattern: foundational layers → mergeAll, dependent layers → provideMerge
+    - Re-exporting individual layers provides flexibility for tests needing only specific mocks
+
+  CI Verification:
+    - bun run typecheck: PASSED
+    - bun test: PASSED (74 tests total)
+    - Feature verification: PASSED (file exists, TestLive present)
+
+  Suggested next: effect-047 (Program integration tests) - uses TestLive to test mainLoop
+
+  Git: Committed aeadfe9, pushed to origin ralph/0115-1208-effect-041
+  PR: https://github.com/peterpine83/ralph/pull/17
+
+[2026-01-15 17:40] Completed: effect-047 - Program integration tests
+  Implemented:
+    - Created src/program.test.ts with comprehensive integration tests
+    - Tests for runIteration verify features count and git changes detection
+    - Tests for mainLoop verify completion, iteration progression, and circuit breaker
+    - All 6 tests pass using TestLive layer composition
+    - Fixed mainLoop while condition to run at least once (iteration === 0 check)
+
+  Decisions:
+    - Used Layer.mergeAll to compose custom test layers with TestLive
+    - Mocked DockerService.readFile with progressive features.json responses
+    - Used Effect.catchTag to verify CircuitBreakerError is thrown correctly
+    - Created stateful mocks (iterationCount) to simulate feature progression
+
+  Learnings for next iteration:
+    - Effect.iterate while condition is checked BEFORE first iteration
+    - Fixed mainLoop to always run at least once: (state.iteration === 0 || state.remainingFeaturesCount > 0)
+    - Effect.catchTag pattern works well for testing expected failures
+    - Test layers can override TestLive services using Layer.mergeAll
+    - Stateful mocks (using closure variables) enable progressive behavior simulation
+
+  CI Verification:
+    - bun run typecheck: PASSED
+    - bun test: PASSED (80 tests total, +6 new tests)
+    - Feature verification: PASSED (6/6 program tests pass)
+
+  Suggested next: effect-048 (ralph.ts thin wrapper) - updates entry point to use Effect-based main.ts
+
+  Git: Ready to commit and push

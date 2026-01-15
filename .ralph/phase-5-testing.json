@@ -94,7 +94,7 @@
         "Verify Effect.runPromise is used for test execution"
       ],
       "verification": "test -f src/program.test.ts && bun test src/program.test.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-048",
