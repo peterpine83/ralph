@@ -1,9 +1,12 @@
 // ConfigLive layer implementation
 import { Layer, Effect, Config } from "effect"
 import { Command } from "@effect/platform"
-import { ConfigService } from "../services/Config"
+import { ConfigService, type IConfigService } from "../services/Config"
 import { ConfigError } from "../errors"
 import type { RalphArgs } from "../args"
+
+// Type alias for consistency with spec
+type CliArgs = RalphArgs
 
 /**
  * Detect git root directory using git rev-parse
@@ -50,7 +53,14 @@ export const makeConfigLive = (cliArgs: RalphArgs) =>
         oauthToken,
         githubToken,
         gitRoot,
-        featuresPath: cliArgs.featuresPath
-      } as any
+        featuresPath: cliArgs.featuresPath,
+        branch: cliArgs.branch,
+        maxIterations: cliArgs.maxIterations,
+        dashboardPort: cliArgs.dashboardPort,
+        timeoutMs: 5 * 60 * 1000, // 5 minutes
+        once: cliArgs.once,
+        stepMode: cliArgs.step,
+        dashboardEnabled: cliArgs.dashboard
+      } satisfies IConfigService
     })
   )
