@@ -3,6 +3,7 @@ import { BunRuntime } from "@effect/platform-bun"
 import { Effect, Console } from "effect"
 import { mainLoop } from "./program.js"
 import { MainLive } from "./layers/index.js"
+import { parseArgs } from "./args.js"
 
 /**
  * Main entry point using BunRuntime.runMain
@@ -22,20 +23,12 @@ import { MainLive } from "./layers/index.js"
  * 5. Run mainLoop with proper parameters
  */
 
-// Placeholder: In a real implementation, these would come from CLI args and createSession
+// Parse CLI arguments
+const args = parseArgs(process.argv.slice(2))
+
+// Placeholder: In a real implementation, these would come from createSession
 const placeholderContainerName = "ralph-session-placeholder"
 const placeholderPrompt = "Read .ralph-prompt.md and follow the instructions."
-
-// Placeholder cliArgs
-const placeholderCliArgs = {
-  featuresPath: ".ralph/features.json",
-  branch: "main",
-  once: false,
-  maxIterations: 50,
-  dashboard: false,
-  dashboardPort: 3847,
-  step: false,
-}
 
 // Placeholder initial dashboard state
 const placeholderState = {
@@ -58,7 +51,7 @@ const placeholderState = {
 const program = mainLoop({
   containerName: placeholderContainerName,
   prompt: placeholderPrompt,
-}).pipe(Effect.provide(MainLive(placeholderCliArgs, placeholderContainerName, placeholderState)))
+}).pipe(Effect.provide(MainLive(args, placeholderContainerName, placeholderState)))
 
 // Execute with BunRuntime.runMain
 // Using catchAll for error handling instead of catchTags to avoid type conflicts
