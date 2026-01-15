@@ -8,7 +8,8 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "bunx tsc --noEmit",
-    "typecheck:watch": "bunx tsc --noEmit --watch"
+    "typecheck:watch": "bunx tsc --noEmit --watch",
+    "build": "echo 'No build step needed - Bun runs TypeScript directly'"
   },
   "devDependencies": {
     "@types/bun": "latest"

@@ -4,6 +4,8 @@ This directory contains modular specifications for the Ralph autonomous coding o
 
 ## Quick Reference
 
+### Core Specs
+
 | Spec | File | Description |
 |------|------|-------------|
 | **Orchestrator** | [orchestrator.md](./orchestrator.md) | Main loop, iteration control, circuit breaker |
@@ -12,6 +14,15 @@ This directory contains modular specifications for the Ralph autonomous coding o
 | **Networking** | [networking.md](./networking.md) | Firewall, iptables, domain whitelisting |
 | **Claude Integration** | [claude-integration.md](./claude-integration.md) | CLI invocation, stream-json parsing |
 | **Dashboard** | [dashboard.md](./dashboard.md) | SSE server, HTTP endpoints, state management |
+
+### Effect.ts Specs
+
+| Spec | File | Description |
+|------|------|-------------|
+| **Effect Architecture** | [effect-architecture.md](./effect-architecture.md) | Overall Effect integration strategy |
+| **Effect Services** | [effect-services.md](./effect-services.md) | Service interfaces and Layer implementations |
+| **Effect Errors** | [effect-errors.md](./effect-errors.md) | Tagged error types and handling patterns |
+| **Effect Streams** | [effect-streams.md](./effect-streams.md) | NDJSON parsing with Effect Stream |
 
 ## System Overview
 

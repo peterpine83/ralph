@@ -16,7 +16,7 @@
 │     - features.json must exist and be valid                     │
 │  3. createSession()                                              │
 │     - Create container with firewall                            │
-│     - Copy project files                                         │
+│     - Clone project from remote (not copy)                      │
 │     - Checkout/create branch                                     │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -29,11 +29,14 @@
 │    1. ensureContainerRunning()                                  │
 │    2. Read features.json from container                         │
 │    3. Filter remaining features (passes: false)                 │
-│    4. If none remaining → push & break                          │
+│    4. If none remaining:                                         │
+│       - First time: set finalVerificationDone, run Claude       │
+│       - Second time: mark PR ready & break                      │
 │    5. Write .ralph-prompt.md (instructions for Claude)          │
 │    6. runClaudeInContainer() with 5-minute timeout              │
 │    7. Check for git changes:                                     │
 │       - hasUnpushedCommits() → push, reset noChangeCount        │
+│       - If pushed, reset finalVerificationDone                  │
 │       - No changes → increment noChangeCount                    │
 │    8. Circuit breaker: noChangeCount >= 3 → abort               │
 └─────────────────────────────────────────────────────────────────┘
@@ -80,9 +83,10 @@ Creates and initializes a new container session.
 2. Create container with required capabilities
 3. Start container (runs entrypoint.sh)
 4. Wait for firewall initialization ("Ralph Firewall Ready")
-5. Copy project via tar stream
+5. Clone project from remote repository (ensures clean state, no local uncommitted changes)
 6. Fix permissions (`chown node:node`)
-7. Fetch and checkout branch
+7. For new sessions: create branch, copy local features.json
+8. For resume: checkout existing branch from remote
 
 **Docker create command:**
 ```bash
@@ -145,6 +149,61 @@ if (hasUnpushedCommits(gitLogOutput)) {
 }
 ```
 
+## Per-Feature CI Verification
+
+**Critical:** Claude must run the full CI suite after implementing EVERY feature. This is a mandatory gate—Claude cannot proceed without CI passing.
+
+### CI Suite (run after each feature)
+1. `bun run typecheck` (or project equivalent)
+2. `bun test` (or project equivalent)
+3. `bun run build` (if build script exists)
+4. Feature's `verify_command` (if present)
+
+### The Rule
+- Claude CANNOT mark `passes: true` until ALL checks pass
+- Claude CANNOT commit until ALL checks pass
+- Claude CANNOT move to the next feature until ALL checks pass
+- If CI fails, Claude must fix the issues and rerun CI
+
+### Why This Matters
+Each feature must leave the codebase in a working state. Without per-feature verification:
+- Bugs compound across features
+- The next iteration inherits broken code
+- The PR fails CI and blocks merging
+
+The orchestrator delegates verification entirely to Claude via instructions. Claude is responsible for running CI and fixing failures before marking any feature complete.
+
+## Final Verification
+
+When all features are marked `passes: true`, run one additional iteration for Claude to verify the entire project.
+
+```typescript
+let finalVerificationDone = false
+
+// When remaining.length === 0:
+if (finalVerificationDone) {
+  // Second time seeing all features complete - PR is ready
+  await markPRReady()
+  break
+}
+// First time - run Claude for final verification
+finalVerificationDone = true
+// Continue to run Claude (don't break)
+
+// If Claude makes changes during verification, reset:
+if (pushSucceeded) {
+  finalVerificationDone = false
+}
+```
+
+Claude's final verification iteration:
+1. Runs `bun run typecheck`
+2. Runs `bun test`
+3. Runs `bun run build` (if build script exists)
+4. If any fail, fixes issues, commits, and pushes
+
+This ensures the PR only becomes ready when all tests, typecheck, and build pass.
+
 ## Step Mode
 
 Pause after each iteration for tuning and review. Useful for observing Claude's behavior and adjusting prompts.
@@ -171,12 +230,21 @@ if (shouldStep && !once) {
 
 ## Signal Handling
 
-Graceful shutdown via Ctrl+C or dashboard stop button.
+Immediate shutdown via Ctrl+C or dashboard stop button.
 
 ### Shutdown Flow
-1. First SIGINT/SIGTERM → set `stopping = true`, wait for Claude to finish
+1. First SIGINT/SIGTERM → set `stopping = true`, abort Claude process immediately
 2. Second signal → force exit immediately
 3. Always run cleanup (container removal) in finally block
+
+### Abort Controller
+Claude process can be terminated immediately via abort controller:
+```typescript
+let claudeAbortController: AbortController | null = null
+
+// When stop requested (signal or dashboard)
+claudeAbortController?.abort()  // Kills Claude immediately
+```
 
 ### State Variables
 ```typescript
@@ -197,10 +265,10 @@ See `src/args.ts` for parsing logic.
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `[features.json]` | `features.json` | Path to features file |
+| `[features.json]` | `.ralph/features.json` | Path to features file |
 | `--branch <name>` | `ralph/MMDD-HHMM-{feature}` | Resume existing branch |
 | `--once` | `false` | Run single iteration only |
-| `--max-iterations <n>` | `5` | Maximum loop iterations |
+| `--max-iterations <n>` | `50` | Maximum loop iterations |
 | `--step` | `false` | Pause after each iteration for review |
 | `--dashboard` | `false` | Enable web dashboard |
 | `--dashboard-port <n>` | `3847` | Dashboard server port |
@@ -236,7 +304,7 @@ let containerName: string
 ```
 
 ### Persistent State (container filesystem)
-- `/workspace/features.json` - Feature completion status
+- `/workspace/.ralph/features.json` - Feature completion status
 - `/workspace/.git/` - Git history and branches
 - `/workspace/ralph-progress.txt` - Claude's learning notes
 - `/workspace/.ralph-prompt.md` - Current iteration instructions

@@ -10,11 +10,11 @@ export interface RalphArgs {
   step: boolean
 }
 
-const DEFAULT_MAX_ITERATIONS = 5
+const DEFAULT_MAX_ITERATIONS = 50
 const DEFAULT_DASHBOARD_PORT = 3847
 
 export function parseArgs(args: string[]): RalphArgs {
-  let featuresPath = "features.json"
+  let featuresPath = ".ralph/features.json"
   let branch: string | undefined
   let once = false
   let maxIterations = DEFAULT_MAX_ITERATIONS

@@ -30,7 +30,7 @@
 │  │  ├─ POST /pause      → Pause orchestrator               │    │
 │  │  ├─ POST /resume     → Resume orchestrator              │    │
 │  │  ├─ POST /step-mode  → Toggle step mode                 │    │
-│  │  ├─ POST /stop       → Graceful shutdown                │    │
+│  │  ├─ POST /stop       → Immediate stop (kills Claude)   │    │
 │  │  ├─ GET  /prompt     → Get prompt template              │    │
 │  │  ├─ PUT  /prompt     → Update prompt template           │    │
 │  │  └─ GET  /*          → Static files (dashboard UI)      │    │
@@ -231,13 +231,14 @@ app.post("/step-mode", async (req) => {
 ```
 
 ### `POST /stop`
-Request graceful shutdown. Waits for Claude to finish before stopping.
+Immediately stops the session by killing the Claude process.
 
 **Response**: `{ stopping: true }`
 
 ```typescript
 app.post("/stop", () => {
   state.stopping = true
+  onStopCallback?.()  // Kill Claude immediately via abort controller
   broadcastState()
   return Response.json({ stopping: true })
 })

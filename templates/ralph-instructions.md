@@ -14,20 +14,24 @@ Implement exactly ONE feature, then EXIT. The orchestrator handles iteration.
 
 1. Read features.json to see remaining features (where passes:false)
 2. Read ralph-progress.txt to understand recent work and context
-3. **Research via subagents** (see Research Strategy below)
-4. **Choose the most logical next feature** considering:
+3. **If ALL features already pass** (no remaining features):
+   - Run final verification: `bun run typecheck`, `bun test`, and `bun run build` (if build script exists)
+   - If any fail, fix the issues, commit, and push
+   - EXIT after verification passes
+4. **Research via subagents** (see Research Strategy below)
+5. **Choose the most logical next feature** considering:
    - Dependencies: Does this feature depend on other incomplete features?
    - Prerequisites: Are required packages/directories already set up?
    - Foundation first: Setup and config features usually come before app features
    - Avoid blockers: Skip features that need manual steps or external services
    - Build incrementally: Choose features that build on completed work
-5. Implement the chosen feature fully
-6. Run verification (see Feedback Loops below)
-7. If ALL verifications pass:
+6. Implement the chosen feature fully
+7. Run CI verification (see CI Verification Gate below) - THIS IS MANDATORY
+8. If ALL verifications pass:
    - Set `passes: true` in features.json
    - Commit and push (see Git Workflow below)
    - Append a summary to ralph-progress.txt
-8. **EXIT immediately** — your work for this iteration is complete
+9. **EXIT immediately** — your work for this iteration is complete
 
 ## Research Strategy (Context Management)
 
@@ -96,8 +100,23 @@ git commit -m "Feature: setup-002 - Dependencies installed"
 git push
 ```
 
+### Update PR Description After Each Feature
+After pushing, update the PR description to reflect current feature progress:
+```bash
+# Generate checkbox list from features.json (checked for passes:true, unchecked for passes:false)
+CHECKBOXES=$(cat .ralph/features.json | jq -r '.features[] | "- [\(if .passes then "x" else " " end)] \(.id): \(.description | split(".")[0])"')
+gh pr edit $(git branch --show-current) --body "## Features
+
+Implementing features from features.json:
+$CHECKBOXES
+
+---
+*Automated by Ralph*"
+```
+This keeps the PR description in sync with actual progress.
+
 ### PR Already Exists
-Check first: `gh pr view $(git branch --show-current)`. If a PR exists, just push - the PR will update automatically.
+Check first: `gh pr view $(git branch --show-current)`. If a PR exists, push your changes and then update the PR description with the checkbox command above.
 
 ### Always Push
 After every successful commit, push immediately. This ensures:
@@ -118,23 +137,45 @@ After every successful commit, push immediately. This ensures:
 - Read existing patterns before writing new code
 - Run verification command before setting passes:true
 
-## Feedback Loops (CRITICAL)
+## CI Verification Gate (MANDATORY - NO EXCEPTIONS)
 
-Before marking any feature as passes:true, you MUST:
+**YOU CANNOT PROCEED WITHOUT CI PASSING.** This is the most important rule.
 
-1. Run the feature's verification command
-2. Run global checks to ensure you didn't break anything:
-   - Type checking: `{tooling.typecheck_command}` or `pnpm type-check` if exists
-   - Linting: `{tooling.lint_command}` or `pnpm lint` if exists
-   - Tests: `{tooling.test_command}` or `pnpm test` if exists
+After implementing ANY feature, you MUST run the full CI suite:
 
-If ANY check fails:
-- DO NOT mark the feature as passes:true
-- Fix the issue first
-- Re-run checks until they all pass
-- Only then mark passes:true and commit
+1. **Type checking**: `bun run typecheck` (or project equivalent)
+2. **Tests**: `bun test` (or project equivalent)
+3. **Build**: `bun run build` (if build script exists)
+4. **Feature verification**: Run the feature's `verification` command
 
-This is non-negotiable. CI must stay green after every feature.
+### The Rule
+
+**If ANY check fails, you MUST fix it before doing ANYTHING else.**
+
+- You CANNOT mark `passes: true` until ALL checks pass
+- You CANNOT commit until ALL checks pass
+- You CANNOT move to the next feature until ALL checks pass
+- You CANNOT exit the iteration until ALL checks pass (unless blocked)
+
+### The Process
+
+```
+1. Implement feature
+2. Run CI suite (typecheck, test, build)
+3. CI fails? → Fix it → Go to step 2
+4. CI passes? → Run feature verification
+5. Verification fails? → Fix it → Go to step 2
+6. ALL green? → NOW you can mark passes:true and commit
+```
+
+### Why This Matters
+
+Each feature must leave the codebase in a working state. If you skip verification:
+- Bugs compound across features
+- The next iteration inherits broken code
+- The PR will fail CI and block merging
+
+**There are no exceptions. Run the checks. Fix the failures. Then proceed.**
 
 ## What To Write
 
@@ -190,8 +231,14 @@ Or if blocked:
 ```
 
 ## No Orchestrator Verification
-The orchestrator only checks that you pushed. You are responsible for ALL verification.
-Do the verification yourself before committing.
+The orchestrator only checks that you pushed. **You are solely responsible for ALL verification.**
+
+The orchestrator trusts you to run CI. If you skip it:
+- Broken code gets committed
+- The next iteration inherits your mess
+- The PR fails and blocks merging
+
+**Run typecheck, tests, and build after EVERY feature. No exceptions.**
 
 ## No Stdout Output Required
 The orchestrator reads features.json and ralph-progress.txt to understand what happened.

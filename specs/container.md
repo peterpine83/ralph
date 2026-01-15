@@ -13,10 +13,11 @@
 │  Base: node:22-slim                                             │
 │                                                                  │
 │  Installed:                                                      │
-│  ├─ Claude Code CLI (@anthropic-ai/claude-code)                 │
+│  ├─ Claude Code CLI (native installer via claude.ai/install.sh) │
+│  ├─ Bun runtime (for projects using bun)                        │
 │  ├─ GitHub CLI (gh)                                             │
 │  ├─ Network tools (iptables, ipset, curl, dig)                  │
-│  ├─ Git, jq, openssh-client                                     │
+│  ├─ Git, jq, openssh-client, unzip                              │
 │  └─ Privilege tools (sudo, gosu)                                │
 │                                                                  │
 │  User: node (non-root, UID 1000)                                │
@@ -53,14 +54,20 @@ docker create \
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. Project Copy
+### 3. Project Clone
 ```bash
-# From host to container via tar stream
-tar -c --exclude=node_modules --exclude=.git ... | \
-  docker exec -i <container> tar -x -C /workspace
+# Clone from remote repository (ensures clean state, no local uncommitted changes)
+docker exec -u node <container> git clone --branch <branch> <remote-url> /tmp/repo
+docker exec <container> cp -a /tmp/repo/. /workspace/
+docker exec <container> rm -rf /tmp/repo
 
 # Fix ownership
 docker exec <container> chown -R node:node /workspace
+
+# For new sessions: copy local features.json (may not be committed yet)
+docker exec -u node <container> bash -c 'cat > /workspace/.ralph/features.json << EOF
+<features-content>
+EOF'
 ```
 
 ### 4. Git Setup
@@ -125,7 +132,7 @@ FROM node:22-slim
 # Network tools for firewall
 RUN apt-get update && apt-get install -y \
     iptables ipset iproute2 aggregate \
-    curl dnsutils \
+    curl dnsutils unzip \
     # ...
 
 # Git and GitHub CLI
@@ -135,8 +142,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | .
 # Privilege management
 RUN apt-get install -y sudo gosu
 
-# Claude Code CLI (npm global)
-RUN npm install -g @anthropic-ai/claude-code
+# Bun runtime (for projects using bun as package manager)
+RUN curl -fsSL https://bun.sh/install | bash && \
+    ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
+    ln -s /root/.bun/bin/bunx /usr/local/bin/bunx
+
+# Claude Code CLI via native installer (recommended by Anthropic)
+# Installs self-contained binary that doesn't require Node.js or package managers
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    ln -s /root/.claude/bin/claude /usr/local/bin/claude
 
 # Non-root user setup
 RUN mkdir -p /home/node/.claude && chown -R node:node /home/node
@@ -221,7 +235,7 @@ describe("parseStaleContainers", () => {
 | Orchestrator Function | Container Operations |
 |-----------------------|----------------------|
 | `cleanupStaleContainers()` | `docker ps`, `docker rm` |
-| `createSession()` | `docker create`, `docker start`, `tar`, `docker exec` |
+| `createSession()` | `docker create`, `docker start`, `git clone`, `docker exec` |
 | `ensureContainerRunning()` | `docker inspect`, `docker start` |
 | `runClaudeInContainer()` | `docker exec` |
 | Cleanup | `docker rm -f` |
