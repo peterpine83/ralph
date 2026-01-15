@@ -1,0 +1,139 @@
+{
+  "project": "Ralph Effect Migration - Phase 5: Testing & Integration",
+  "created": "2026-01-14",
+  "tooling": {
+    "package_manager": "bun",
+    "test_runner": "bun test",
+    "build_command": "bun run typecheck"
+  },
+  "features": [
+    {
+      "id": "effect-041",
+      "category": "functional",
+      "description": "Error type tests verify _tag discriminator and catchTag matching",
+      "steps": [
+        "Open src/errors/index.test.ts",
+        "Verify tests for each error type exist",
+        "Check _tag property assertions",
+        "Verify Effect.catchTag matching works correctly"
+      ],
+      "verification": "test -f src/errors/index.test.ts && bun test src/errors/index.test.ts",
+      "passes": true
+    },
+    {
+      "id": "effect-042",
+      "category": "functional",
+      "description": "Stream tests verify parseNDJSON handles valid JSON, empty lines, and invalid JSON",
+      "steps": [
+        "Open src/streams/ndjson.test.ts",
+        "Verify test for valid NDJSON parsing",
+        "Check test for empty line filtering",
+        "Verify test for StreamError on invalid JSON"
+      ],
+      "verification": "test -f src/streams/ndjson.test.ts && bun test src/streams/ndjson.test.ts",
+      "passes": true
+    },
+    {
+      "id": "effect-043",
+      "category": "functional",
+      "description": "ConfigTest mock layer provides test configuration values",
+      "steps": [
+        "Open src/layers/test/ConfigTest.ts",
+        "Verify Layer.succeed provides mock ConfigService",
+        "Check all required config fields have test values",
+        "Verify layer can be used in test composition"
+      ],
+      "verification": "test -f src/layers/test/ConfigTest.ts && grep -q 'Layer.succeed' src/layers/test/ConfigTest.ts",
+      "passes": true
+    },
+    {
+      "id": "effect-044",
+      "category": "functional",
+      "description": "DockerTest mock layer simulates container operations",
+      "steps": [
+        "Open src/layers/test/DockerTest.ts",
+        "Verify Layer.succeed provides mock DockerService",
+        "Check exec returns predictable responses based on command",
+        "Verify create/start/remove return Effect.succeed"
+      ],
+      "verification": "test -f src/layers/test/DockerTest.ts && grep -q 'Layer.succeed' src/layers/test/DockerTest.ts && grep -q 'DockerService' src/layers/test/DockerTest.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-045",
+      "category": "functional",
+      "description": "ClaudeTest, GitTest, and DashboardTest mock layers are created",
+      "steps": [
+        "Verify src/layers/test/ClaudeTest.ts exists with mock run/runWithEvents",
+        "Verify src/layers/test/GitTest.ts exists with mock git operations",
+        "Verify src/layers/test/DashboardTest.ts exists with mock state management"
+      ],
+      "verification": "test -f src/layers/test/ClaudeTest.ts && test -f src/layers/test/GitTest.ts && test -f src/layers/test/DashboardTest.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-046",
+      "category": "functional",
+      "description": "TestLive layer composition combines all mock layers for integration testing",
+      "steps": [
+        "Open src/layers/test/index.ts",
+        "Verify TestLive exports composed mock layers",
+        "Check it can be used with Effect.provide in tests"
+      ],
+      "verification": "test -f src/layers/test/index.ts && grep -q 'TestLive' src/layers/test/index.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-047",
+      "category": "functional",
+      "description": "Program integration tests verify mainLoop completes when all features pass",
+      "steps": [
+        "Open src/program.test.ts",
+        "Verify test uses TestLive layer",
+        "Check test asserts mainLoop completes successfully",
+        "Verify Effect.runPromise is used for test execution"
+      ],
+      "verification": "test -f src/program.test.ts && bun test src/program.test.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-048",
+      "category": "functional",
+      "description": "ralph.ts is updated to be a thin wrapper that delegates to src/main.ts",
+      "steps": [
+        "Open ralph.ts",
+        "Verify it imports and runs the Effect-based implementation",
+        "Check backwards compatibility for CLI usage is maintained",
+        "Test 'bun ralph.ts --help' still works"
+      ],
+      "verification": "grep -q 'import' ralph.ts && grep -q 'main' ralph.ts",
+      "passes": false
+    },
+    {
+      "id": "effect-049",
+      "category": "functional",
+      "description": "CLAUDE.md documents the new Effect architecture patterns",
+      "steps": [
+        "Open CLAUDE.md",
+        "Verify Effect patterns section exists (services, layers, errors)",
+        "Check file locations table is updated with new structure",
+        "Verify commands section still works"
+      ],
+      "verification": "grep -q 'Effect' CLAUDE.md && grep -q 'Layer' CLAUDE.md && grep -q 'services' CLAUDE.md",
+      "passes": false
+    },
+    {
+      "id": "effect-050",
+      "category": "integration",
+      "description": "All tests pass and typecheck succeeds for the complete Effect migration",
+      "steps": [
+        "Run 'bun run typecheck' - should succeed",
+        "Run 'bun test' - all tests should pass",
+        "Verify no TypeScript errors in src/ directory"
+      ],
+      "verification": "bun run typecheck && bun test",
+      "passes": false
+    }
+  ]
+}
+

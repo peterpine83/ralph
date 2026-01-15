@@ -1,0 +1,88 @@
+[2026-01-15 17:10] Completed: effect-041 - Error type tests
+  Implemented:
+    - Created src/errors/index.test.ts with comprehensive tests for all 10 error types
+    - Tests verify _tag discriminators for each error type
+    - Tests verify Effect.catchTag matching works correctly
+    - Tests verify property initialization including optional properties
+    - Added multi-error handling test using Effect.catchTags
+    - All 33 tests pass
+
+  Decisions:
+    - Used union type (ConfigError | DockerError) in test to satisfy TypeScript type inference
+    - Followed existing test patterns from src/args.test.ts and src/container.test.ts
+    - Tested all GitError operation types: clone, fetch, push, commit, checkout, status, diff, log, branch
+
+  Learnings for next iteration:
+    - Effect.catchTag requires proper type inference - use union types when catching multiple error types
+    - Data.TaggedError from Effect.ts provides _tag property automatically
+    - node_modules was missing initially - needed to run bun install first
+
+  CI Verification:
+    - bun run typecheck: PASSED
+    - bun test: PASSED (63 tests total)
+    - Feature verification: PASSED (33 error tests)
+
+  Suggested next: effect-042 (Stream tests) - builds on error handling with StreamError
+
+  Git: Committed 302729f, pushed to origin ralph/0115-1208-effect-041
+  PR: https://github.com/peterpine83/ralph/pull/17
+
+[2026-01-15 17:15] Completed: effect-042 - Stream tests
+  Implemented:
+    - Created src/streams/ndjson.test.ts with 11 comprehensive tests
+    - Tests verify valid NDJSON parsing with nested objects and arrays
+    - Tests verify empty line filtering (whitespace-only lines)
+    - Tests verify StreamError on invalid JSON with proper error structure
+    - Tests verify long line truncation in error messages (131 char max)
+    - Tests verify Effect.catchTag integration works correctly
+    - All 11 tests pass
+
+  Decisions:
+    - Used Stream.make for test data generation
+    - Used Effect.flip to test error cases (converts failure to success)
+    - Verified error message format: "Invalid JSON in NDJSON stream: " + line.slice(0, 100)
+    - Followed existing test patterns from src/errors/index.test.ts
+
+  Learnings for next iteration:
+    - Stream.runCollect + Effect.map(chunk => Array.from(chunk)) is the pattern for collecting stream results
+    - Effect.flip is useful for testing error cases - flips success/failure
+    - Error message length is 31 (prefix) + 100 (truncated line) = 131 chars max
+    - Stream.empty and Stream.make are useful for creating test streams
+
+  CI Verification:
+    - bun run typecheck: PASSED
+    - bun test: PASSED (74 tests total)
+    - Feature verification: PASSED (11 stream tests)
+
+  Suggested next: effect-043 (ConfigTest mock layer) - foundational for test infrastructure
+
+[2026-01-15 17:20] Completed: effect-043 - ConfigTest mock layer
+  Implemented:
+    - Created src/layers/test/ConfigTest.ts with Layer.succeed pattern
+    - Provides mock ConfigService with all required fields (oauthToken, gitRoot)
+    - Includes sensible test defaults for optional fields (githubToken, featuresPath, etc.)
+    - Uses fast timeouts (10s) and test-friendly port (13847) for tests
+    - All boolean flags default to false for predictable test behavior
+
+  Decisions:
+    - Used Layer.succeed() pattern matching ConfigLive implementation style
+    - Set maxIterations=3 for faster tests (vs production default of 5)
+    - Used realistic token formats (test-oauth-token-12345) for debugging clarity
+    - Set gitRoot=/tmp/test-repo to avoid filesystem dependencies
+
+  Learnings for next iteration:
+    - Layer.succeed() creates a simple layer without Effect.gen complexity
+    - ConfigService.of() is the constructor pattern for service instances
+    - Test layers should mirror production layer exports for easy swapping
+    - Mock tokens should be identifiable as test values for debugging
+
+  CI Verification:
+    - bun run typecheck: PASSED
+    - bun test: PASSED (74 tests total)
+    - Feature verification: PASSED (file exists, Layer.succeed present)
+
+  Suggested next: effect-044 (DockerTest mock layer) - builds on ConfigTest pattern
+
+  Git: Committed fcc4f68, pushed to origin ralph/0115-1208-effect-041
+  PR: https://github.com/peterpine83/ralph/pull/17
+
