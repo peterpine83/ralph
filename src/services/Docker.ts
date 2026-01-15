@@ -42,7 +42,7 @@ export interface ExecStreamOutput {
 }
 
 // DockerService interface for container lifecycle management
-export interface DockerService {
+export interface IDockerService {
   /**
    * Create a new container from an image
    */
@@ -125,5 +125,5 @@ export interface DockerService {
 
 export class DockerService extends Context.Tag("ralph/DockerService")<
   DockerService,
-  DockerService
+  IDockerService
 >() {}
