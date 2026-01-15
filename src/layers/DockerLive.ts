@@ -177,7 +177,47 @@ const implementation = {
           status: statusOutput
         } satisfies ContainerInfo
       }),
-    exec: () => Effect.dieMessage("Not implemented yet"),
+    exec: (containerName: string, command: string, options?: { readonly user?: string; readonly workdir?: string; readonly env?: ReadonlyArray<string> }) =>
+      Effect.gen(function* () {
+        // Build docker exec command arguments
+        const args = ["exec"]
+
+        // Add user option if specified
+        if (options?.user) {
+          args.push("-u", options.user)
+        }
+
+        // Add workdir option if specified
+        if (options?.workdir) {
+          args.push("-w", options.workdir)
+        }
+
+        // Add environment variables if specified
+        if (options?.env) {
+          for (const envVar of options.env) {
+            args.push("-e", envVar)
+          }
+        }
+
+        // Add container name and command
+        args.push(containerName, "sh", "-c", command)
+
+        // Execute docker exec command and return output
+        const output = yield* Command.make("docker", ...args).pipe(
+          Command.string,
+          Effect.map((output) => output.trim()),
+          Effect.mapError(
+            (e) =>
+              new DockerError({
+                command: "exec",
+                cause: e
+              })
+          ),
+          Effect.provide(BunContext.layer)
+        )
+
+        return output
+      }),
     execStream: () => Effect.dieMessage("Not implemented yet"),
     readFile: () => Effect.dieMessage("Not implemented yet"),
     writeFile: () => Effect.dieMessage("Not implemented yet"),
