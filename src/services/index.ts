@@ -1,0 +1,10 @@
+// Services barrel file for convenient imports
+export { ConfigService } from "./Config"
+export { DockerService } from "./Docker"
+export type { ContainerConfig, ContainerInfo, ExecOptions, ExecStreamOutput, DockerError } from "./Docker"
+export { ClaudeService } from "./Claude"
+export type { ClaudeRunOptions, ClaudeError, TimeoutError } from "./Claude"
+export { GitService } from "./Git"
+export type { GitError } from "./Git"
+export { DashboardService } from "./Dashboard"
+export type { DashboardError } from "./Dashboard"
