@@ -4,13 +4,39 @@ import { Command } from "@effect/platform"
 import { BunContext } from "@effect/platform-bun"
 import { DockerService, type IDockerService } from "../services/Docker"
 import { DockerError } from "../errors"
-import type { ContainerConfig, ContainerInfo } from "../services/Docker"
+import type { ContainerConfig, ContainerInfo, ExecOptions } from "../services/Docker"
+
+/**
+ * Build exec arguments from options (user, workdir, env)
+ */
+function buildExecArgs(
+  baseArgs: string[],
+  options?: ExecOptions
+): string[] {
+  const args = [...baseArgs]
+
+  if (options?.user) {
+    args.push("-u", options.user)
+  }
+
+  if (options?.workdir) {
+    args.push("-w", options.workdir)
+  }
+
+  if (options?.env) {
+    for (const envVar of options.env) {
+      args.push("-e", envVar)
+    }
+  }
+
+  return args
+}
 
 /**
  * DockerLive layer - implements DockerService using @effect/platform Command
  * Provides BunContext.layer for CommandExecutor
  */
-const implementation = {
+const implementation: IDockerService = {
     create: (config: ContainerConfig) =>
       Effect.gen(function* () {
         // Build docker create command arguments
@@ -177,109 +203,41 @@ const implementation = {
           status: statusOutput
         } satisfies ContainerInfo
       }),
-    exec: (containerName: string, command: string, options?: { readonly user?: string; readonly workdir?: string; readonly env?: ReadonlyArray<string> }) =>
+    exec: (containerName: string, command: string, options?: ExecOptions) =>
       Effect.gen(function* () {
-        // Build docker exec command arguments
-        const args = ["exec"]
-
-        // Add user option if specified
-        if (options?.user) {
-          args.push("-u", options.user)
-        }
-
-        // Add workdir option if specified
-        if (options?.workdir) {
-          args.push("-w", options.workdir)
-        }
-
-        // Add environment variables if specified
-        if (options?.env) {
-          for (const envVar of options.env) {
-            args.push("-e", envVar)
-          }
-        }
-
-        // Add container name and command
+        const args = buildExecArgs(["exec"], options)
         args.push(containerName, "sh", "-c", command)
 
-        // Execute docker exec command and return output
         const output = yield* Command.make("docker", ...args).pipe(
           Command.string,
-          Effect.map((output) => output.trim()),
-          Effect.mapError(
-            (e) =>
-              new DockerError({
-                command: "exec",
-                cause: e
-              })
-          ),
+          Effect.map((o) => o.trim()),
+          Effect.mapError((e) => new DockerError({ command: "exec", cause: e })),
           Effect.provide(BunContext.layer)
         )
 
         return output
       }),
-    execStream: (containerName: string, command: string, options?: { readonly user?: string; readonly workdir?: string; readonly env?: ReadonlyArray<string> }) =>
+    execStream: (containerName: string, command: string, options?: ExecOptions) =>
       Effect.scoped(
         Effect.gen(function* () {
-          // Build docker exec command arguments
-          const args = ["exec", "-i"]
-
-          // Add user option if specified
-          if (options?.user) {
-            args.push("-u", options.user)
-          }
-
-          // Add workdir option if specified
-          if (options?.workdir) {
-            args.push("-w", options.workdir)
-          }
-
-          // Add environment variables if specified
-          if (options?.env) {
-            for (const envVar of options.env) {
-              args.push("-e", envVar)
-            }
-          }
-
-          // Add container name and command
+          const args = buildExecArgs(["exec", "-i"], options)
           args.push(containerName, "sh", "-c", command)
 
-          // Start the command process to get access to streams
           const process = yield* Command.make("docker", ...args).pipe(
             Command.start,
-            Effect.mapError(
-              (e) =>
-                new DockerError({
-                  command: "exec",
-                  cause: e
-                })
-            ),
+            Effect.mapError((e) => new DockerError({ command: "exec", cause: e })),
             Effect.provide(BunContext.layer)
           )
 
-          // Return stdout and stderr as Effect Streams of strings
-          // Convert Uint8Array streams to string streams
+          const decoder = new TextDecoder()
+          const mapToString = Stream.map((chunk: Uint8Array) => decoder.decode(chunk))
+          const mapDockerError = Stream.mapError((e: unknown) =>
+            new DockerError({ command: "exec", cause: e })
+          )
+
           return {
-            stdout: process.stdout.pipe(
-              Stream.map((chunk: Uint8Array) => new TextDecoder().decode(chunk)),
-              Stream.mapError(
-                (e) =>
-                  new DockerError({
-                    command: "exec",
-                    cause: e
-                  })
-              )
-            ),
-            stderr: process.stderr.pipe(
-              Stream.map((chunk: Uint8Array) => new TextDecoder().decode(chunk)),
-              Stream.mapError(
-                (e) =>
-                  new DockerError({
-                    command: "exec",
-                    cause: e
-                  })
-              )
-            )
+            stdout: process.stdout.pipe(mapToString, mapDockerError),
+            stderr: process.stderr.pipe(mapToString, mapDockerError),
           }
         })
       ),

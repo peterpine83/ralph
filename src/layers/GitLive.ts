@@ -123,29 +123,17 @@ export const makeGitLive = (containerName: string) =>
 
         configureUser: (name: string, email: string) =>
           Effect.gen(function* () {
+            const mapConfigError = Effect.mapError(
+              (e: unknown) => new GitError({ operation: "config", cause: e })
+            )
+
             yield* docker
               .exec(containerName, `git config user.name "${name}"`)
-              .pipe(
-                Effect.mapError(
-                  (e) =>
-                    new GitError({
-                      operation: "checkout",
-                      cause: e
-                    })
-                )
-              )
+              .pipe(mapConfigError)
 
             yield* docker
               .exec(containerName, `git config user.email "${email}"`)
-              .pipe(
-                Effect.mapError(
-                  (e) =>
-                    new GitError({
-                      operation: "checkout",
-                      cause: e
-                    })
-                )
-              )
+              .pipe(mapConfigError)
           })
       } as any
     })

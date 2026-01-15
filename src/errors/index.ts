@@ -36,7 +36,7 @@ export class TimeoutError extends Data.TaggedError("TimeoutError")<{
 
 // effect-007: GitError - Git operation failures
 export class GitError extends Data.TaggedError("GitError")<{
-  operation: "clone" | "fetch" | "push" | "commit" | "checkout" | "status" | "diff" | "log" | "branch"
+  operation: "clone" | "fetch" | "push" | "commit" | "checkout" | "status" | "diff" | "log" | "branch" | "config"
   stderr?: string
   cause?: unknown
 }> {}
