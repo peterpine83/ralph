@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { DockerService, type ContainerConfig } from "./services/Docker.js"
 import { ConfigService } from "./services/Config.js"
 import { generateContainerName, type SessionConfig, getRemainingFeatures } from "./container.js"
-import { DockerError } from "./errors/index.js"
+import { DockerError, CircuitBreakerError } from "./errors/index.js"
 import { ClaudeService } from "./services/Claude.js"
 import { GitService } from "./services/Git.js"
 
@@ -261,4 +261,71 @@ export const runIteration = (params: {
       remainingFeaturesCount: remainingFeatures.length,
       gitChangesPushed: hasChanges,
     }
+  })
+
+/**
+ * Main orchestration loop using Effect.iterate
+ *
+ * The loop continues while:
+ * - There are remaining features to implement
+ * - Circuit breaker hasn't triggered (< 3 consecutive no-change iterations)
+ *
+ * Each iteration:
+ * 1. Calls runIteration to execute Claude and push changes
+ * 2. Tracks whether git changes were pushed
+ * 3. Increments noChangeCount if no changes, resets if changes detected
+ * 4. Triggers CircuitBreakerError after 3 consecutive no-change iterations
+ *
+ * Returns when all features pass or circuit breaker triggers
+ */
+export const mainLoop = (params: {
+  containerName: string
+  prompt: string
+}) =>
+  Effect.gen(function* () {
+    // Use Effect.iterate for the orchestration loop
+    const finalState = yield* Effect.iterate(
+      // Initial state
+      { iteration: 0, noChangeCount: 0, remainingFeaturesCount: 0 },
+      {
+        // Continue while there are features remaining and circuit breaker hasn't triggered
+        while: (state) =>
+          state.remainingFeaturesCount > 0 && state.noChangeCount < 3,
+
+        // Body: execute one iteration
+        body: (state) =>
+          Effect.gen(function* () {
+            // Run one iteration
+            const result = yield* runIteration({
+              containerName: params.containerName,
+              prompt: params.prompt,
+            })
+
+            // Update noChangeCount based on whether changes were pushed
+            const newNoChangeCount = result.gitChangesPushed
+              ? 0 // Reset if changes detected
+              : state.noChangeCount + 1 // Increment if no changes
+
+            // Return next state
+            return {
+              iteration: state.iteration + 1,
+              noChangeCount: newNoChangeCount,
+              remainingFeaturesCount: result.remainingFeaturesCount,
+            }
+          }),
+      }
+    )
+
+    // Check if circuit breaker was triggered
+    if (finalState.noChangeCount >= 3) {
+      return yield* Effect.fail(
+        new CircuitBreakerError({
+          iterations: finalState.iteration,
+          reason: `No git changes pushed for ${finalState.noChangeCount} consecutive iterations`,
+        })
+      )
+    }
+
+    // Successfully completed all features
+    return finalState
   })
