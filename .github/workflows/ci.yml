@@ -15,6 +15,7 @@ jobs:
       - run: bun run typecheck
 
   test:
+    needs: typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +24,7 @@ jobs:
       - run: bun test
 
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
