@@ -20,6 +20,13 @@ const state: DashboardState = {
   promptTemplate: "",
 }
 
+// Callback to abort Claude process (set by orchestrator to avoid circular import)
+let onStopCallback: (() => void) | null = null
+
+export function setOnStopCallback(callback: () => void): void {
+  onStopCallback = callback
+}
+
 // Broadcast event to all connected clients
 function broadcast(event: DashboardEvent): void {
   const data = `data: ${JSON.stringify(event)}\n\n`
@@ -245,9 +252,10 @@ export function startDashboardServer(port: number, dashboardPath: string): void 
         })()
       }
 
-      // Stop endpoint (graceful shutdown)
+      // Stop endpoint (immediate stop)
       if (url.pathname === "/stop" && req.method === "POST") {
         state.stopping = true
+        onStopCallback?.()  // Kill Claude immediately
         broadcastState()
         return new Response(JSON.stringify({ stopping: true }), {
           headers: { "Content-Type": "application/json" },
