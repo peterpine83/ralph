@@ -95,93 +95,50 @@ interface ClaudeResultEvent {
 {"type":"result","subtype":"success","cost_usd":0.05,"duration_ms":45000,"is_error":false,"num_turns":12}
 ```
 
+## Stream Processing Design
+
+Ralph uses Effect Stream for NDJSON parsing instead of manual buffer management.
+
+### Why Effect Stream?
+
+Manual stream handling has several issues:
+- **Manual buffer management** - Must track incomplete lines across chunks
+- **No guaranteed cleanup** - Reader.releaseLock() easily forgotten
+- **Error handling mixed with business logic** - Try-catch interleaved with parsing
+- **Type safety relies on casts** - JSON.parse returns unknown
+
+Effect Stream provides:
+- **Automatic cleanup** - Resources released when stream ends or errors
+- **Backpressure** - Consumer controls flow, preventing memory issues
+- **Composition** - Streams compose cleanly with map, filter, flatMap
+- **Typed errors** - StreamError propagates through pipeline
+
+### Error Recovery
+
+Invalid JSON lines produce `StreamError` but don't abort the stream. The implementation skips invalid lines and continues parsing, allowing Claude output with mixed JSON/text to be processed.
+
+See `CLAUDE.md` for the `parseNDJSON` implementation in `src/streams/ndjson.ts`.
+
 ## Output Parsing
 
-### Stream Processing
-```typescript
-// ralph.ts - runClaudeInContainer()
+The `ClaudeService.runWithEvents()` method returns a `Stream<ClaudeEvent, ClaudeError>` that emits typed events as Claude produces output. Events are:
 
-const proc = Bun.spawn(["docker", "exec", "-u", "node", container, "claude", ...])
-const reader = proc.stdout.getReader()
-const decoder = new TextDecoder()
-let buffer = ""
+- **system/init** - Session started, lists available tools
+- **assistant** - Claude's response with content blocks (text, tool_use, tool_result)
+- **result** - Final summary with cost, duration, success/error status
 
-while (true) {
-  const { done, value } = await reader.read()
-  if (done) break
-
-  buffer += decoder.decode(value, { stream: true })
-  const lines = buffer.split("\n")
-  buffer = lines.pop() || ""  // Keep incomplete line in buffer
-
-  for (const line of lines) {
-    if (!line.trim()) continue
-    try {
-      const event = JSON.parse(line)
-      handleClaudeEvent(event)
-    } catch {
-      // Not JSON - treat as raw output
-      console.log(line)
-    }
-  }
-}
-```
-
-### Event Handling
-```typescript
-function handleClaudeEvent(event: ClaudeEvent) {
-  switch (event.type) {
-    case "system":
-      console.log(`Session: ${event.session_id}`)
-      break
-
-    case "assistant":
-      for (const block of event.message.content) {
-        if (block.type === "text") {
-          console.log(block.text)
-        } else if (block.type === "tool_use") {
-          console.log(`[Tool: ${block.name}]`)
-        }
-      }
-      break
-
-    case "result":
-      console.log(`Cost: $${event.cost_usd.toFixed(4)}`)
-      console.log(`Duration: ${(event.duration_ms / 1000).toFixed(1)}s`)
-      break
-  }
-
-  // Forward to dashboard if enabled
-  sendClaudeEvent(event)
-}
-```
+Events are forwarded to `DashboardService.broadcast()` for real-time display.
 
 ## Timeout Handling
 
-Claude is killed after 5 minutes to prevent runaway sessions:
+Claude is killed after a configurable timeout (default 10 minutes) to prevent runaway sessions.
 
-```typescript
-const TIMEOUT_MS = 5 * 60 * 1000
+`ClaudeService.runWithEvents()` applies `Effect.timeout()` to the stream pipeline. When timeout triggers:
+1. A `TimeoutError` is produced with operation name and duration
+2. The underlying process is terminated via Effect's interruption model
+3. Resources are cleaned up automatically by Effect
 
-const controller = new AbortController()
-const timeout = setTimeout(() => {
-  controller.abort()
-}, TIMEOUT_MS)
-
-try {
-  const proc = Bun.spawn([...], { signal: controller.signal })
-  // ... process output
-} catch (e) {
-  if (e instanceof Error && e.name === "AbortError") {
-    console.log("TIMEOUT: Claude killed after 5 minutes")
-    // Kill container process
-    await Bun.$`docker exec ${container} pkill -f claude`.nothrow()
-  }
-  throw e
-} finally {
-  clearTimeout(timeout)
-}
-```
+The orchestrator catches `TimeoutError` and increments the no-change counter, then continues to the next iteration.
 
 ## Prompt Template
 
@@ -243,17 +200,7 @@ Claude cannot:
 
 ## Dashboard Integration
 
-Claude events are forwarded to connected dashboard clients:
-
-```typescript
-// src/server.ts
-function sendClaudeEvent(event: ClaudeEvent) {
-  broadcast({
-    type: "claude",
-    data: event
-  })
-}
-```
+Claude events are forwarded to connected dashboard clients via `DashboardService.broadcast()`.
 
 The dashboard uses these events to:
 - Display Claude's thinking in real-time

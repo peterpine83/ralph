@@ -1,6 +1,6 @@
 # Container Specification
 
-**Files**: `src/container.ts`, `docker/Dockerfile.base`, `docker/entrypoint.sh`
+**Files**: `src/services/Docker.ts` (interface), `src/layers/DockerLive.ts` (implementation), `docker/Dockerfile.base`, `docker/entrypoint.sh`
 **Purpose**: Docker container lifecycle management and pure utility functions
 
 ## Architecture
@@ -25,6 +25,36 @@
 │  Entrypoint: /usr/local/bin/entrypoint.sh                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Docker Service Design
+
+### Why Abstract Docker Operations?
+
+Before Effect, docker operations used direct shell calls:
+- **Hard to test** - Required actual Docker daemon
+- **Error handling scattered** - Try-catch in every call site
+- **No consistent error types** - Mixed Error, exit codes, stderr
+
+DockerService abstraction provides:
+- **Testability** - Test layers provide mock implementations without Docker
+- **Typed errors** - All operations return `Effect<T, DockerError | ContainerNotFoundError>`
+- **Composability** - Operations compose with other Effect services
+- **Swappability** - Could swap for Podman or other container runtimes
+
+### Service Operations
+
+The DockerService interface provides:
+- `create(config)` - Create container with environment, volumes, capabilities
+- `start(name)` - Start a container
+- `exec(name, cmd, options)` - Execute command in container
+- `execStream(name, cmd)` - Execute with streaming stdout/stderr
+- `inspect(name)` - Check if container is running
+- `remove(name)` - Remove container
+- `listByPrefix(prefix)` - List containers matching prefix
+- `readFile(name, path)` - Read file from container
+- `writeFile(name, path, content)` - Write file to container
+
+See `CLAUDE.md` for DockerLive implementation details.
 
 ## Container Lifecycle
 
@@ -83,7 +113,7 @@ git config --system core.sshCommand "ssh -i /tmp/.ssh/id_rsa -o StrictHostKeyChe
 docker rm -f <container>
 ```
 
-## Pure Utility Functions (`src/container.ts`)
+## Pure Utility Functions (`src/utils/container.ts`)
 
 These functions have no side effects and are fully testable without Docker.
 
@@ -212,30 +242,19 @@ chmod 600 /tmp/.ssh/*
 
 ## Testing
 
-Container utilities are tested without Docker:
+Container utilities and DockerService are tested at two levels:
 
-```typescript
-// src/container.test.ts
-import { describe, expect, test } from "bun:test"
-import { parseStaleContainers, getRemainingFeatures } from "./container"
+1. **Pure utility functions** - Tested directly without Docker
+2. **DockerService** - Tested via `DockerTest` layer which provides mock implementations
 
-describe("parseStaleContainers", () => {
-  test("parses multiple containers", () => {
-    expect(parseStaleContainers("ralph-1\nralph-2")).toEqual(["ralph-1", "ralph-2"])
-  })
-
-  test("handles empty output", () => {
-    expect(parseStaleContainers("")).toEqual([])
-  })
-})
-```
+Test layers allow testing orchestration logic without a Docker daemon. See `src/layers/test/DockerTest.ts`.
 
 ## Integration with Orchestrator
 
-| Orchestrator Function | Container Operations |
-|-----------------------|----------------------|
-| `cleanupStaleContainers()` | `docker ps`, `docker rm` |
-| `createSession()` | `docker create`, `docker start`, `git clone`, `docker exec` |
-| `ensureContainerRunning()` | `docker inspect`, `docker start` |
-| `runClaudeInContainer()` | `docker exec` |
-| Cleanup | `docker rm -f` |
+| Orchestrator Function | DockerService Operation |
+|-----------------------|-------------------------|
+| `cleanupStaleContainers()` | `listByPrefix("ralph-")`, `remove()` |
+| `createSession()` | `create()`, `start()`, `exec()`, `writeFile()` |
+| `ensureContainerRunning()` | `inspect()`, `start()` |
+| `runClaudeInContainer()` | `execStream()` via ClaudeService |
+| Cleanup | `remove()` |
