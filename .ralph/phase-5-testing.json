@@ -81,7 +81,7 @@
         "Check it can be used with Effect.provide in tests"
       ],
       "verification": "test -f src/layers/test/index.ts && grep -q 'TestLive' src/layers/test/index.ts",
-      "passes": false
+      "passes": true
     },
     {
       "id": "effect-047",
