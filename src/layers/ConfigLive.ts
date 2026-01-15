@@ -27,7 +27,7 @@ const detectGitRoot = Effect.gen(function* () {
 /**
  * Create ConfigLive layer with CLI arguments merged with environment config
  */
-export const makeConfigLive = (cliArgs: RalphArgs) =>
+export const makeConfigLive = (cliArgs: CliArgs) =>
   Layer.effect(
     ConfigService,
     Effect.gen(function* () {
