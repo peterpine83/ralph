@@ -289,8 +289,10 @@ export const mainLoop = (params: {
       { iteration: 0, noChangeCount: 0, remainingFeaturesCount: 0 },
       {
         // Continue while there are features remaining and circuit breaker hasn't triggered
+        // Always run at least once (iteration === 0) to discover the actual feature count
         while: (state) =>
-          state.remainingFeaturesCount > 0 && state.noChangeCount < 3,
+          (state.iteration === 0 || state.remainingFeaturesCount > 0) &&
+          state.noChangeCount < 3,
 
         // Body: execute one iteration
         body: (state) =>
