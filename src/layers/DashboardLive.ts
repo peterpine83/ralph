@@ -1,7 +1,7 @@
 // DashboardLive layer implementation
 import { Layer, Effect, Ref } from "effect"
 import { DashboardService } from "../services/Dashboard"
-import type { DashboardState, DashboardEvent, Feature } from "../types"
+import type { DashboardState, DashboardEvent, StateEvent, Feature } from "../types"
 
 /**
  * Create DashboardLive layer with SSE server lifecycle management
@@ -25,14 +25,37 @@ export const makeDashboardLive = (initialState: DashboardState) =>
           const clients = yield* Ref.get(clientsRef)
           const eventData = `data: ${JSON.stringify(event)}\n\n`
 
-          // Send to all connected clients
           for (const controller of clients) {
             try {
               controller.enqueue(new TextEncoder().encode(eventData))
-            } catch (error) {
+            } catch {
               // Client disconnected, will be removed on next cleanup
             }
           }
+        })
+
+      // Helper to create state event from current state
+      function createStateEvent(state: DashboardState): StateEvent {
+        return {
+          type: "state",
+          data: {
+            paused: state.paused,
+            running: state.running,
+            stepMode: state.stepMode,
+            stopping: state.stopping,
+            claudeRunning: state.claudeRunning,
+            containerName: state.containerName,
+            branch: state.branch,
+          },
+        }
+      }
+
+      // Helper to update state and broadcast
+      const updateAndBroadcast = (updates: Partial<DashboardState>) =>
+        Effect.gen(function* () {
+          yield* Ref.update(stateRef, (state) => ({ ...state, ...updates }))
+          const newState = yield* Ref.get(stateRef)
+          yield* broadcastToClients(createStateEvent(newState))
         })
 
       // Use 'as any' workaround for Context.Tag interface/class shadowing issue
@@ -40,115 +63,17 @@ export const makeDashboardLive = (initialState: DashboardState) =>
       const service = {
         getState: () => Ref.get(stateRef),
 
-        updateState: (updates: Partial<DashboardState>) =>
-          Effect.gen(function* () {
-            yield* Ref.update(stateRef, (state) => ({ ...state, ...updates }))
+        updateState: (updates: Partial<DashboardState>) => updateAndBroadcast(updates),
 
-            // Broadcast state change event
-            const newState = yield* Ref.get(stateRef)
-            yield* broadcastToClients({
-              type: "state",
-              data: {
-                paused: newState.paused,
-                running: newState.running,
-                stepMode: newState.stepMode,
-                stopping: newState.stopping,
-                claudeRunning: newState.claudeRunning,
-                containerName: newState.containerName,
-                branch: newState.branch,
-              },
-            })
-          }),
+        setPaused: (paused: boolean) => updateAndBroadcast({ paused }),
 
-        setPaused: (paused: boolean) =>
-          Effect.gen(function* () {
-            yield* Ref.update(stateRef, (state) => ({ ...state, paused }))
-            const newState = yield* Ref.get(stateRef)
-            yield* broadcastToClients({
-              type: "state",
-              data: {
-                paused: newState.paused,
-                running: newState.running,
-                stepMode: newState.stepMode,
-                stopping: newState.stopping,
-                claudeRunning: newState.claudeRunning,
-                containerName: newState.containerName,
-                branch: newState.branch,
-              },
-            })
-          }),
+        setRunning: (running: boolean) => updateAndBroadcast({ running }),
 
-        setRunning: (running: boolean) =>
-          Effect.gen(function* () {
-            yield* Ref.update(stateRef, (state) => ({ ...state, running }))
-            const newState = yield* Ref.get(stateRef)
-            yield* broadcastToClients({
-              type: "state",
-              data: {
-                paused: newState.paused,
-                running: newState.running,
-                stepMode: newState.stepMode,
-                stopping: newState.stopping,
-                claudeRunning: newState.claudeRunning,
-                containerName: newState.containerName,
-                branch: newState.branch,
-              },
-            })
-          }),
+        setStopping: (stopping: boolean) => updateAndBroadcast({ stopping }),
 
-        setStopping: (stopping: boolean) =>
-          Effect.gen(function* () {
-            yield* Ref.update(stateRef, (state) => ({ ...state, stopping }))
-            const newState = yield* Ref.get(stateRef)
-            yield* broadcastToClients({
-              type: "state",
-              data: {
-                paused: newState.paused,
-                running: newState.running,
-                stepMode: newState.stepMode,
-                stopping: newState.stopping,
-                claudeRunning: newState.claudeRunning,
-                containerName: newState.containerName,
-                branch: newState.branch,
-              },
-            })
-          }),
+        setStepMode: (stepMode: boolean) => updateAndBroadcast({ stepMode }),
 
-        setStepMode: (stepMode: boolean) =>
-          Effect.gen(function* () {
-            yield* Ref.update(stateRef, (state) => ({ ...state, stepMode }))
-            const newState = yield* Ref.get(stateRef)
-            yield* broadcastToClients({
-              type: "state",
-              data: {
-                paused: newState.paused,
-                running: newState.running,
-                stepMode: newState.stepMode,
-                stopping: newState.stopping,
-                claudeRunning: newState.claudeRunning,
-                containerName: newState.containerName,
-                branch: newState.branch,
-              },
-            })
-          }),
-
-        setClaudeRunning: (running: boolean) =>
-          Effect.gen(function* () {
-            yield* Ref.update(stateRef, (state) => ({ ...state, claudeRunning: running }))
-            const newState = yield* Ref.get(stateRef)
-            yield* broadcastToClients({
-              type: "state",
-              data: {
-                paused: newState.paused,
-                running: newState.running,
-                stepMode: newState.stepMode,
-                stopping: newState.stopping,
-                claudeRunning: newState.claudeRunning,
-                containerName: newState.containerName,
-                branch: newState.branch,
-              },
-            })
-          }),
+        setClaudeRunning: (running: boolean) => updateAndBroadcast({ claudeRunning: running }),
 
         setIteration: (current: number, max: number, remaining: number) =>
           Effect.gen(function* () {
@@ -209,18 +134,7 @@ export const makeDashboardLive = (initialState: DashboardState) =>
 
                       // Send initial state
                       const state = Effect.runSync(Ref.get(stateRef))
-                      const stateEvent: DashboardEvent = {
-                        type: "state",
-                        data: {
-                          paused: state.paused,
-                          running: state.running,
-                          stepMode: state.stepMode,
-                          stopping: state.stopping,
-                          claudeRunning: state.claudeRunning,
-                          containerName: state.containerName,
-                          branch: state.branch,
-                        },
-                      }
+                      const stateEvent = createStateEvent(state)
                       controller.enqueue(
                         new TextEncoder().encode(`data: ${JSON.stringify(stateEvent)}\n\n`)
                       )

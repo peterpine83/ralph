@@ -58,10 +58,7 @@ const program = mainLoop({
 BunRuntime.runMain(
   program.pipe(
     Effect.catchAll((error) =>
-      Effect.gen(function* () {
-        yield* Console.error(`Error: ${String(error)}`)
-        return yield* Effect.void
-      })
+      Console.error(`Error: ${String(error)}`)
     )
   ) as Effect.Effect<void, never, never>
 )
