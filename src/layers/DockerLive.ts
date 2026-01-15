@@ -283,10 +283,81 @@ const implementation = {
           }
         })
       ),
-    readFile: () => Effect.dieMessage("Not implemented yet"),
-    writeFile: () => Effect.dieMessage("Not implemented yet"),
+    readFile: (containerName: string, path: string) =>
+      Effect.gen(function* () {
+        // Build docker exec command to read file using cat
+        const args = ["exec", containerName, "cat", path]
+
+        // Execute docker exec and return the file content as string
+        const content = yield* Command.make("docker", ...args).pipe(
+          Command.string,
+          Effect.mapError(
+            (e) =>
+              new DockerError({
+                command: "readFile",
+                cause: e
+              })
+          ),
+          Effect.provide(BunContext.layer)
+        )
+
+        return content
+      }),
+
+    writeFile: (containerName: string, path: string, content: string) =>
+      Effect.gen(function* () {
+        // Create a stream from the file content string
+        // TextEncoder converts string to Uint8Array for stdin piping
+        const contentStream = Stream.make(new TextEncoder().encode(content))
+
+        // Build docker exec command for writing via stdin
+        // Using -i flag to enable stdin and tee to avoid escaping issues
+        const args = ["exec", "-i", containerName, "tee", path]
+
+        // Execute command with stdin piping
+        yield* Command.make("docker", ...args).pipe(
+          Command.stdin(contentStream),
+          Command.string,
+          Effect.mapError(
+            (e) =>
+              new DockerError({
+                command: "writeFile",
+                cause: e
+              })
+          ),
+          Effect.provide(BunContext.layer)
+        )
+      }),
+
     copyToContainer: () => Effect.dieMessage("Not implemented yet"),
-    listByPrefix: () => Effect.dieMessage("Not implemented yet")
+
+    listByPrefix: (containerName: string, prefix: string) =>
+      Effect.gen(function* () {
+        // Build command to list files by prefix using find
+        // Using find with -name pattern to match prefix
+        const command = `find /workspace -maxdepth 1 -name '${prefix}*' -type f -printf '%f\\n' 2>/dev/null || true`
+
+        // Execute the command and get output
+        const output = yield* Command.make("docker", "exec", containerName, "sh", "-c", command).pipe(
+          Command.string,
+          Effect.map((output) => output.trim()),
+          Effect.mapError(
+            (e) =>
+              new DockerError({
+                command: "listByPrefix",
+                cause: e
+              })
+          ),
+          Effect.provide(BunContext.layer)
+        )
+
+        // Parse output into array of file names
+        const files = output.length > 0
+          ? output.split('\n').filter((line) => line.trim().length > 0)
+          : []
+
+        return files as ReadonlyArray<string>
+      })
 } satisfies IDockerService
 
 export const DockerLive = Layer.effect(
