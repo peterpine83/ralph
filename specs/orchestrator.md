@@ -1,6 +1,6 @@
 # Orchestrator Specification
 
-**File**: `ralph.ts`
+**Files**: `src/main.ts` (entry point), `src/program.ts` (orchestration logic)
 **Purpose**: External loop that spawns Claude in isolated Docker containers to implement features iteratively
 
 ## Execution Flow
@@ -56,24 +56,12 @@
 ### `cleanupStaleContainers()`
 Removes containers from previous Ralph sessions.
 
-```typescript
-// Pattern: containers named "ralph-*"
-const output = await Bun.$`docker ps -a --filter name=ralph- --format {{.Names}}`.text()
-const containers = parseStaleContainers(output)
-for (const name of containers) {
-  await Bun.$`docker rm -f ${name}`.nothrow().quiet()
-}
-```
+Uses `DockerService.listByPrefix("ralph-")` to find existing containers and `DockerService.remove()` to clean them up. See `CLAUDE.md` for service implementation details.
 
 ### `ensureContainerRunning(containerName: string)`
 Health check with automatic restart.
 
-```typescript
-const output = await Bun.$`docker inspect -f {{.State.Running}} ${containerName}`.text()
-if (!parseContainerRunning(output)) {
-  await Bun.$`docker start ${containerName}`
-}
-```
+Uses `DockerService.inspect()` to check container state and `DockerService.start()` if not running.
 
 ### `createSession(config: SessionConfig)`
 Creates and initializes a new container session.
@@ -88,66 +76,27 @@ Creates and initializes a new container session.
 7. For new sessions: create branch, copy local features.json
 8. For resume: checkout existing branch from remote
 
-**Docker create command:**
-```bash
-docker create \
-  --name ralph-1234567890 \
-  --cap-add=NET_ADMIN \
-  -e CLAUDE_CODE_OAUTH_TOKEN \
-  -e GITHUB_TOKEN \
-  -v ~/.ssh:/root/.ssh:ro \
-  ralph-base:latest \
-  tail -f /dev/null
-```
+**Container configuration includes:**
+- `CAP_NET_ADMIN` capability for firewall setup
+- Environment variables from ConfigService (CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN)
+- SSH volume mounts for git operations
 
 ### `runClaudeInContainer(containerName: string, prompt: string)`
 Executes Claude with timeout and output streaming.
 
-**Command:**
-```bash
-docker exec -u node <container> \
-  claude -p \
-  --dangerously-skip-permissions \
-  --verbose \
-  --output-format stream-json \
-  "<prompt>"
-```
-
-**Timeout handling:**
-```typescript
-const controller = new AbortController()
-const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000)
-
-try {
-  const proc = Bun.spawn([...], { signal: controller.signal })
-  // Stream output...
-} catch (e) {
-  if (e instanceof Error && e.name === "AbortError") {
-    // Timeout reached - kill Claude process
-  }
-}
-```
+Uses `ClaudeService.runWithEvents()` which:
+- Builds the Claude CLI command with flags (--output-format stream-json, --verbose, etc.)
+- Streams NDJSON events via Effect Stream for automatic cleanup
+- Applies timeout via `Effect.timeout()` producing a `TimeoutError` if exceeded
+- Returns a stream of typed ClaudeEvent objects
 
 ## Circuit Breaker Logic
 
-Prevents infinite loops when Claude gets stuck:
+Prevents infinite loops when Claude gets stuck.
 
-```typescript
-let noChangeCount = 0
-const MAX_NO_CHANGE = 3
+**Behavior**: After each iteration, if `GitService.hasUnpushedCommits()` returns false, increment `noChangeCount`. After 3 consecutive iterations without git changes, abort with `CircuitBreakerError`.
 
-// After each iteration:
-if (hasUnpushedCommits(gitLogOutput)) {
-  await pushChanges()
-  noChangeCount = 0  // Reset on successful change
-} else {
-  noChangeCount++
-  if (noChangeCount >= MAX_NO_CHANGE) {
-    console.error("Circuit breaker: No git changes for 3 iterations")
-    break
-  }
-}
-```
+The circuit breaker state is tracked via `Effect.iterate()` in `program.ts`, which manages iteration state immutably. On successful push, `noChangeCount` resets to 0.
 
 ## Per-Feature CI Verification
 
@@ -177,24 +126,7 @@ The orchestrator delegates verification entirely to Claude via instructions. Cla
 
 When all features are marked `passes: true`, run one additional iteration for Claude to verify the entire project.
 
-```typescript
-let finalVerificationDone = false
-
-// When remaining.length === 0:
-if (finalVerificationDone) {
-  // Second time seeing all features complete - PR is ready
-  await markPRReady()
-  break
-}
-// First time - run Claude for final verification
-finalVerificationDone = true
-// Continue to run Claude (don't break)
-
-// If Claude makes changes during verification, reset:
-if (pushSucceeded) {
-  finalVerificationDone = false
-}
-```
+**Behavior**: Track `finalVerificationDone` in iteration state. First time all features pass, run Claude for final verification. If Claude makes and pushes changes, reset the flag. Second time all features pass without new changes, mark PR ready and exit.
 
 Claude's final verification iteration:
 1. Runs `bun run typecheck`
@@ -209,24 +141,15 @@ This ensures the PR only becomes ready when all tests, typecheck, and build pass
 Pause after each iteration for tuning and review. Useful for observing Claude's behavior and adjusting prompts.
 
 ### Enabling Step Mode
-- **CLI**: `bun ralph.ts --step features.json`
+- **CLI**: `bun src/main.ts --step features.json`
 - **Dashboard**: Toggle "Step" checkbox at runtime
 
 ### Post-Iteration Checkpoint
 After Claude completes and commits are pushed:
-1. If step mode enabled → set `paused = true`
+1. If step mode enabled → set `paused = true` via `DashboardService.updateState()`
 2. Show CLI prompt: `[c]ontinue, [s]top`
 3. Wait for user input OR dashboard resume
 4. Continue or break based on response
-
-```typescript
-if (shouldStep && !once) {
-  console.log("Step mode: Iteration complete")
-  // Wait for CLI input or dashboard resume
-  const action = await promptForAction()
-  if (action === "stop") break
-}
-```
 
 ## Signal Handling
 
@@ -237,26 +160,10 @@ Immediate shutdown via Ctrl+C or dashboard stop button.
 2. Second signal → force exit immediately
 3. Always run cleanup (container removal) in finally block
 
-### Abort Controller
-Claude process can be terminated immediately via abort controller:
-```typescript
-let claudeAbortController: AbortController | null = null
+### Abort Mechanism
+The ClaudeService supports interruption via Effect's interruption model. When stop is requested (signal or dashboard), the current Claude execution is interrupted, allowing cleanup to proceed.
 
-// When stop requested (signal or dashboard)
-claudeAbortController?.abort()  // Kills Claude immediately
-```
-
-### State Variables
-```typescript
-let shutdownRequested = false  // CLI signal received
-
-// In signal handler:
-if (shutdownRequested) {
-  process.exit(1)  // Force exit on second signal
-}
-shutdownRequested = true
-setStopping(true)  // Update dashboard state
-```
+Dashboard state is updated via `DashboardService.updateState({ stopping: true })` to reflect shutdown status.
 
 ## Configuration
 
@@ -296,12 +203,11 @@ This format makes branches easy to sort chronologically while showing what each 
 
 ## State Management
 
-### Orchestrator State (in-memory)
-```typescript
-let iteration = 0
-let noChangeCount = 0
-let containerName: string
-```
+### Orchestrator State
+Iteration state is managed immutably via `Effect.iterate()` in `program.ts`:
+- `iteration` - Current iteration count
+- `noChangeCount` - Consecutive iterations without git changes
+- `containerName` - Active container identifier
 
 ### Persistent State (container filesystem)
 - `/workspace/.ralph/features.json` - Feature completion status
@@ -309,41 +215,31 @@ let containerName: string
 - `/workspace/ralph-progress.txt` - Claude's learning notes
 - `/workspace/.ralph-prompt.md` - Current iteration instructions
 
-### Dashboard State (optional)
-Managed by `src/server.ts`, broadcast via SSE:
-```typescript
-interface DashboardState {
-  paused: boolean
-  running: boolean
-  stepMode: boolean      // Pause after each iteration
-  stopping: boolean      // Graceful shutdown requested
-  claudeRunning: boolean // Claude process currently active
-  containerName: string
-  branch: string
-  features: Feature[]
-}
-```
+### Dashboard State
+Managed by `DashboardService` using Effect `Ref` for thread-safe, immutable updates. State is broadcast to connected clients via SSE. See `CLAUDE.md` for DashboardState interface.
 
 ## Error Handling
 
-### Validation Errors (exit immediately)
-- Missing `CLAUDE_CODE_OAUTH_TOKEN`
-- Not in a git repository
-- Invalid or missing features.json
-- No features defined
+Errors use Effect's typed error channels with `Effect.catchTag` for pattern matching:
 
-### Runtime Errors (retry or abort)
-- Container not running → restart via `ensureContainerRunning()`
-- Claude timeout → increment noChangeCount, continue
-- Git push failure → log error, continue
-- Circuit breaker triggered → abort with message
+### Fatal Errors (exit immediately)
+- `ConfigError` - Missing CLAUDE_CODE_OAUTH_TOKEN or not in git repo
+- `FeatureError` - Invalid or missing features.json
+- `CircuitBreakerError` - 3 iterations without changes
+
+### Recoverable Errors (retry or continue)
+- `DockerError` - Retry container operations with backoff
+- `TimeoutError` - Increment noChangeCount, continue to next iteration
+- `GitError` - Log and continue (push failures don't abort)
+
+See `CLAUDE.md` for complete error type definitions.
 
 ## Integration Points
 
 | Component | Integration |
 |-----------|-------------|
-| Container | `createSession()`, `ensureContainerRunning()` |
-| Features | Read via `docker exec cat`, parsed by `getRemainingFeatures()` |
-| Claude | Spawned via `runClaudeInContainer()` |
-| Dashboard | State updates via `src/server.ts` functions |
-| Git | Branch management, change detection, push operations |
+| Container | `DockerService.create()`, `DockerService.start()`, `DockerService.exec()` |
+| Features | Read via `DockerService.readFile()`, parsed by `getRemainingFeatures()` |
+| Claude | `ClaudeService.runWithEvents()` with NDJSON streaming |
+| Dashboard | `DashboardService.updateState()`, `DashboardService.broadcast()` |
+| Git | `GitService.checkout()`, `GitService.push()`, `GitService.hasUnpushedCommits()` |

@@ -1,6 +1,6 @@
 # Dashboard Specification
 
-**Files**: `src/server.ts`, `dashboard/`
+**Files**: `src/services/Dashboard.ts` (interface), `src/layers/DashboardLive.ts` (implementation), `dashboard/`
 **Purpose**: Real-time web UI for monitoring Ralph sessions via Server-Sent Events (SSE)
 
 ## Architecture
@@ -133,58 +133,49 @@ function broadcast(event: DashboardEvent) {
 }
 ```
 
+## State Management Design
+
+### Why Effect Ref?
+
+Before Effect, state was a mutable global variable:
+- **Thread-safety issues** - Concurrent updates could race
+- **Testing difficulty** - Hard to reset state between tests
+- **Implicit dependencies** - Any code could mutate state
+
+Effect `Ref` provides:
+- **Immutable updates** - `Ref.update()` returns new state, never mutates
+- **Thread-safe** - Effect ensures atomic updates
+- **Explicit dependency** - State access requires DashboardService
+- **Testable** - Test layers can provide mock state
+
+### Why Layer.scoped?
+
+The dashboard server needs lifecycle management:
+- **Start** when dashboard is enabled
+- **Stop** when program exits (cleanup)
+- **Resource cleanup** - Close client connections
+
+`Layer.scoped` provides:
+- **Automatic finalization** - Server stops when scope ends
+- **Error safety** - Resources cleaned up even on error
+- **Composable** - Integrates with other Effect layers
+
+See `CLAUDE.md` for the DashboardLive implementation.
+
 ## State Management
 
 ### Dashboard State
-```typescript
-interface DashboardState {
-  paused: boolean
-  running: boolean
-  stepMode: boolean      // Pause after each iteration
-  stopping: boolean      // Graceful shutdown requested
-  claudeRunning: boolean // Claude process currently active
-  containerName: string
-  branch: string
-  features: Feature[]
-}
+State is managed via `DashboardService.updateState()` and `DashboardService.getState()`. Updates automatically broadcast to all connected SSE clients.
 
-let state: DashboardState = {
-  paused: false,
-  running: false,
-  stepMode: false,
-  stopping: false,
-  claudeRunning: false,
-  containerName: "",
-  branch: "",
-  features: []
-}
-```
+State fields: `paused`, `running`, `stepMode`, `stopping`, `claudeRunning`, `containerName`, `branch`, `features`
 
-### State Update Functions
+### State Update Methods
 
-```typescript
-function updateState(partial: Partial<DashboardState>) {
-  state = { ...state, ...partial }
-  broadcast({ type: "state", data: state })
-}
-
-function updateIteration(current: number, max: number) {
-  broadcast({ type: "iteration", data: { current, max } })
-}
-
-function updateFeatures(features: Feature[]) {
-  state.features = features
-  broadcast({ type: "features", data: features })
-}
-
-function sendOutput(text: string) {
-  broadcast({ type: "output", data: text })
-}
-
-function sendClaudeEvent(event: ClaudeEvent) {
-  broadcast({ type: "claude", data: event })
-}
-```
+The DashboardService interface provides:
+- `updateState(partial)` - Update state and broadcast
+- `broadcast(event)` - Send event to all clients
+- `sendOutput(text)` - Send output event
+- Convenience setters: `setRunning()`, `setPaused()`, etc.
 
 ## HTTP Endpoints
 
@@ -194,118 +185,33 @@ SSE stream for real-time updates.
 **Response**: `text/event-stream`
 
 ### `POST /pause`
-Pause the orchestrator loop.
-
-```typescript
-app.post("/pause", () => {
-  state.paused = true
-  broadcast({ type: "state", data: state })
-  return new Response("Paused")
-})
-```
+Pause the orchestrator loop. Updates state via `DashboardService.updateState({ paused: true })`.
 
 ### `POST /resume`
-Resume the orchestrator loop.
-
-```typescript
-app.post("/resume", () => {
-  state.paused = false
-  broadcast({ type: "state", data: state })
-  return new Response("Resumed")
-})
-```
+Resume the orchestrator loop. Updates state via `DashboardService.updateState({ paused: false })`.
 
 ### `POST /step-mode`
 Toggle step mode (pause after each iteration).
-
-**Request**: `{ enabled: boolean }`
-**Response**: `{ stepMode: boolean }`
-
-```typescript
-app.post("/step-mode", async (req) => {
-  const body = await req.json()
-  state.stepMode = body.enabled
-  broadcastState()
-  return Response.json({ stepMode: state.stepMode })
-})
-```
+- **Request**: `{ enabled: boolean }`
+- **Response**: `{ stepMode: boolean }`
 
 ### `POST /stop`
-Immediately stops the session by killing the Claude process.
-
-**Response**: `{ stopping: true }`
-
-```typescript
-app.post("/stop", () => {
-  state.stopping = true
-  onStopCallback?.()  // Kill Claude immediately via abort controller
-  broadcastState()
-  return Response.json({ stopping: true })
-})
-```
+Immediately stops the session by setting `stopping: true`. The orchestrator checks this flag and interrupts the current Claude execution.
 
 ### `GET /prompt`
-Retrieve current prompt template.
-
-```typescript
-app.get("/prompt", async () => {
-  const template = await Bun.file("templates/ralph-instructions.md").text()
-  return new Response(template)
-})
-```
+Retrieve current prompt template from `templates/ralph-instructions.md`.
 
 ### `PUT /prompt`
 Update prompt template.
 
-```typescript
-app.put("/prompt", async (req) => {
-  const content = await req.text()
-  await Bun.write("templates/ralph-instructions.md", content)
-  return new Response("Updated")
-})
-```
-
 ### `GET /*`
-Serve static dashboard files.
-
-```typescript
-app.get("/*", (req) => {
-  const path = new URL(req.url).pathname
-  const file = path === "/" ? "index.html" : path.slice(1)
-  return new Response(Bun.file(`dashboard/dist/${file}`))
-})
-```
+Serve static dashboard files from `dashboard/dist/`.
 
 ## Server Startup
 
-```typescript
-// src/server.ts
-export function startDashboardServer(port: number, distDir: string) {
-  return Bun.serve({
-    port,
-    fetch(req) {
-      const url = new URL(req.url)
+The dashboard server starts automatically when `DashboardLive` layer is provided and dashboard is enabled via ConfigService.
 
-      if (url.pathname === "/events") {
-        return handleEventsRequest(req)
-      }
-
-      if (url.pathname === "/pause" && req.method === "POST") {
-        return handlePause()
-      }
-
-      if (url.pathname === "/resume" && req.method === "POST") {
-        return handleResume()
-      }
-
-      // ... other endpoints
-
-      // Static files
-      return serveStatic(req, distDir)
-    }
-  })
-}
-```
+The server uses `Bun.serve()` with request routing to handle SSE connections, control endpoints, and static file serving. Server lifecycle is managed by `Layer.scoped`, ensuring cleanup on program exit.
 
 ## Dashboard UI (`dashboard/`)
 
@@ -335,24 +241,17 @@ bun run build
 
 ### Enabling Dashboard
 ```bash
-bun ralph.ts features.json --dashboard --dashboard-port 3847
+bun src/main.ts features.json --dashboard --dashboard-port 3847
 ```
 
 ### Orchestrator Integration
-```typescript
-// ralph.ts
-import { startDashboardServer, updateState, updateIteration, sendOutput } from "./src/server"
+The orchestrator accesses dashboard functionality via `DashboardService`:
+- `yield* DashboardService` to get the service
+- `dashboard.updateState({ running: true, containerName, branch })`
+- `dashboard.sendOutput(claudeOutputLine)`
+- `dashboard.broadcast({ type: "features", data: features })`
 
-if (args.dashboard) {
-  startDashboardServer(args.dashboardPort, "dashboard/dist")
-}
-
-// During execution
-updateState({ running: true, containerName, branch })
-updateIteration(iteration, args.maxIterations)
-sendOutput(claudeOutputLine)
-updateFeatures(remainingFeatures)
-```
+When dashboard is disabled, operations are no-ops.
 
 ## Connection Lifecycle
 
@@ -373,18 +272,7 @@ updateFeatures(remainingFeatures)
 ## Error Handling
 
 ### Client Disconnect
-```typescript
-function broadcast(event: DashboardEvent) {
-  for (const client of clients) {
-    try {
-      client.enqueue(...)
-    } catch {
-      // Client disconnected
-      clients.delete(client)
-    }
-  }
-}
-```
+When a client disconnects, the broadcast method catches the error and removes the client from the set. This happens automatically within the SSE streaming implementation.
 
 ### Server Restart
 Dashboard reconnects automatically via EventSource retry mechanism.
