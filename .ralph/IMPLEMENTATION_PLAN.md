@@ -4114,4 +4114,329 @@ P4.32-P4.33 Container Utilities ──────► Edge case handling
 P5.52-P5.55 Test Coverage ────────────► Comprehensive testing goal
 P6.50 Context.Tag Workaround ─────────► Technical debt
 P6.51 Test Mock Pattern ──────────────► Test quality
+
+---
+
+New P1 Items (Jan 2026 - Iteration 17):
+
+P1.204 Event Streaming Not Integrated with Orchestrator ► program.ts:241, ClaudeLive.ts:69-134
+  - runWithEvents() method exists but never called by orchestration loop
+  - program.ts:241 uses claude.run() instead of claude.runWithEvents()
+  - Spec requires events forwarded to DashboardService.broadcast()
+  - Dashboard receives NO real-time Claude events despite infrastructure existing
+  - CRITICAL: Core real-time functionality completely unused
+
+P1.205 Dashboard Integration Missing from mainLoop ► program.ts:283-335
+  - mainLoop has no DashboardService calls anywhere
+  - Required integration points per spec:
+    - setClaudeRunning(true/false) before/after Claude run
+    - Pause check: while (isPaused() && !isStopping())
+    - updateFeatures() after parsing features.json
+    - updateIteration() with current/max/remaining
+  - Dashboard UI non-functional without this integration
+
+P1.206 Step Mode Not Implemented ► program.ts:283-335, args.ts:24
+  - args.step flag parsed but never used in mainLoop
+  - Spec requires post-iteration pause in step mode
+  - Should set paused=true via DashboardService after each iteration
+  - Race condition handling needed: Promise.race([promptForAction(), waitForResume()])
+  - Key development/debugging feature missing
+
+P1.207 listByPrefix Implementation Bug ► DockerLive.ts:292-318, services/Docker.ts:120-123
+  - Spec says "List containers matching prefix" for cleanupStaleContainers()
+  - Current implementation lists FILES INSIDE a container, not containers
+  - DockerLive.ts:296 runs: find /workspace -name 'prefix*' -type f
+  - Should run: docker ps -a --filter name=${prefix} --format "{{.Names}}"
+  - Blocks P1.9 startup cleanup functionality
+
+P1.208 JSONL Log Persistence System Missing ► specs/logging-telemetry.md:49-53
+  - No LoggingService implementation exists
+  - Required files: src/services/Logging.ts, src/layers/LoggingLive.ts
+  - File path: .ralph/sessions/{session-id}.jsonl
+  - JSONL format with raw Claude events, one per line
+  - Core persistence requirement for state recovery
+
+P1.209 State Recovery on Reconnect Missing ► specs/logging-telemetry.md:260-284
+  - Browser doesn't load historical iteration data from JSONL on reconnect
+  - Only connects to /events SSE, no recovery logic
+  - Need: GET /logs/:iteration endpoint, useSessionRecovery hook
+  - Critical for dashboard reliability
+
+P1.210 Timeout Configuration Mismatch ► ConfigLive.ts:60, program.ts:244
+  - ConfigLive.ts:60 defaults to 5 minutes
+  - Spec says default should be 10 minutes
+  - program.ts:244 hardcodes 10 minutes, ignoring config value
+  - Should use config.timeoutMs instead of hardcoded value
+
+P1.211 SSH Mount Path Mismatch ► program.ts:37, entrypoint.sh:15
+  - Spec and program.ts mount SSH to /root/.ssh
+  - entrypoint.sh:15 checks /home/node/.ssh instead
+  - SSH keys may not be found, breaking SSH-based git operations
+  - Critical path mismatch
+
+P1.212 git safe.directory Missing from entrypoint.sh ► specs/container.md:211
+  - Spec requires git config --system safe.directory /workspace in entrypoint.sh
+  - Currently missing from docker/entrypoint.sh
+  - Compensated by program.ts:125 but spec says should be in entrypoint
+
+P1.213 verify_command Never Executed ► specs/features.md:72-87, src/
+  - Feature type has verify_command?: string
+  - Spec describes it as bash command that exits 0 on success
+  - NO code anywhere executes this command
+  - All verification delegated to Claude via instructions
+  - ZFC design but orchestrator completely blind to verification status
+
+P1.214 Missing Control Endpoints in DashboardLive ► DashboardLive.ts:115-175
+  - DashboardLive only implements /events (SSE) and static file serving
+  - Missing POST endpoints: /pause, /resume, /step-mode, /stop, /prompt
+  - server.ts:234-281 has these but DashboardLive Effect implementation doesn't
+  - Two parallel implementations with different capabilities
+
+New P2 Items (Jan 2026 - Iteration 17):
+
+P2.70 ContentBlock tool_result Type Missing ► types.ts:95-102
+  - Spec defines tool_result content block type
+  - types.ts only includes text, tool_use, thinking
+  - TypeScript won't recognize tool_result blocks from Claude stream
+  - Type safety gap
+
+P2.71 ClaudeResultEvent interrupted Subtype Missing ► types.ts:117
+  - Spec: subtype: "success" | "error" | "interrupted"
+  - Implementation: subtype: "success" | "error" (missing "interrupted")
+  - Type safety gap when Claude interrupted by timeout
+
+P2.72 mcp_servers Type Mismatch ► types.ts:86
+  - Spec: mcp_servers: string[]
+  - Implementation: mcp_servers: Record<string, unknown>[]
+  - Could cause parsing errors if Claude outputs string array
+
+P2.73 Iteration Boundary Markers Missing ► specs/logging-telemetry.md:72-76
+  - No iteration_start events written to mark boundaries in JSONL
+  - Need: iteration_start event type in types.ts
+  - program.ts should emit at start of each iteration
+  - Required for iteration-specific log retrieval
+
+P2.74 IterationMetrics Type Missing ► specs/logging-telemetry.md:92-102
+  - No type definition for iteration-level token usage and metrics
+  - Spec requires: token counts, context percentage, duration
+  - Needed for iteration sidebar display
+  - ClaudeMessageEvent.message.usage exists but no aggregation
+
+P2.75 ClaudeEventMessage Type Mismatch ► specs/dashboard.md:115-118, types.ts:132-135
+  - Spec: type: "claude"
+  - Implementation: type: "claude_event"
+  - Functional mismatch between spec and code
+
+P2.76 OutputEvent Data Structure Mismatch ► specs/dashboard.md:95-98, types.ts:38-44
+  - Spec: data: string
+  - Implementation: data: { text: string, timestamp: number }
+  - Spec and implementation don't match
+
+P2.77 FeaturesEvent Data Structure Mismatch ► specs/dashboard.md:110-113, types.ts:63-68
+  - Spec: data: Feature[]
+  - Implementation: data: { features: Feature[] }
+  - Object wrapper vs bare array
+
+P2.78 Missing Initial Events in DashboardLive ► DashboardLive.ts:135-140
+  - DashboardLive only sends initial state event
+  - server.ts:136-167 sends state, iteration, AND features
+  - Incomplete initial state synchronization
+
+P2.79 Error Type Duplication ► services/*.ts, errors/index.ts
+  - Error types defined as interfaces in service files
+  - AND as Data.TaggedError classes in errors/index.ts
+  - Service interfaces: {_tag, message, cause?}
+  - errors/index.ts: Data.TaggedError with richer fields
+  - Creates type/runtime mismatch
+
+P2.80 Feature State Transition Tracking Missing ► types.ts:3-8, 50
+  - types.ts:50 FeatureEvent has status: "pending" | "working" | "passed"
+  - types.ts:3-8 Feature only has boolean passes
+  - No mechanism to mark feature as "working" during implementation
+
+P2.81 Invalid JSON Error Handling Missing ► container.ts:42
+  - Raw JSON.parse() with no try-catch
+  - Spec requires explicit error exit for invalid features.json
+  - JSON parse errors throw unhandled exceptions
+
+P2.82 GitHub .packages IP Ranges Missing ► docker/init-firewall.sh:76
+  - Spec requires .packages field for GitHub Packages
+  - Implementation only whitelists .web, .api, .git
+  - May break npm packages from GitHub Packages
+
+New P3 Items (Jan 2026 - Iteration 17):
+
+P3.36 *.githubusercontent.com Missing from Allowlist ► docker/init-firewall.sh:83-89
+  - Spec lists as required domain for GitHub raw content
+  - Not in RALPH_ALLOWED_DOMAINS array
+  - Blocks raw file fetching from GitHub repos
+
+P3.37 Prompt File Writing Not Implemented ► specs/claude-integration.md:28-32
+  - Spec: Write complex prompts to .ralph-prompt.md
+  - Current: Prompt passed directly as CLI argument
+  - No writeFile for .ralph-prompt.md path anywhere
+
+P3.38 Service Naming Inconsistency ► services/*.ts
+  - Three patterns: IDockerService, ClaudeService (interface), service shadowing class
+  - IDockerService, IConfigService use "I" prefix
+  - ClaudeService, GitService, DashboardService shadow class name
+  - Requires as any workarounds due to interface/class shadowing
+
+P3.39 BunContext.layer Provided Inline ► DockerLive.ts (11 occurrences)
+  - DockerLive provides BunContext.layer at every Command execution
+  - Lines: 94, 111, 133, 156, 176, 196, 215, 229, 259, 286, 309
+  - Should be layer dependency for testability
+  - Couples implementation to Bun runtime
+
+P3.40 Tool Calls Not Expanded by Default ► dashboard/src/components/ActivityLog.tsx:68-78
+  - Spec: Tool calls should display expanded by default
+  - Line 74: expanded: false for tool_use items
+  - Simple toggle change needed
+
+P3.41 Prompt Display at Iteration Start Missing ► specs/logging-telemetry.md:170-181
+  - Spec: Prompt displayed at top of activity log with border
+  - No prompt rendering in ActivityLog.tsx
+  - Needed for context when viewing past iterations
+
+P3.42 Features File Existence Validation Missing ► main.ts, program.ts
+  - Effect implementation doesn't validate features.json exists before session
+  - ralph.ts:373-377 has this check
+  - New main.ts is placeholder, skips validation
+
+P3.43 Firewall Ready Detection Uses Sleep ► program.ts:74-75
+  - TODO comment: Implement proper log streaming to detect "Ralph Firewall Ready"
+  - Currently hardcoded 3-second sleep
+  - May be too short (firewall not ready) or too long (delay)
+
+New P4 Items (Jan 2026 - Iteration 17):
+
+P4.34 No Cost/Token Aggregation Logic ► specs/claude-integration.md:224
+  - Spec: Aggregate costs across iterations for total session cost
+  - Types exist (cost_usd, total_cost_usd) but no aggregation logic
+
+P4.35 Syntax Highlighting Missing ► dashboard/, specs/logging-telemetry.md:126-137
+  - Spec: Auto-detect language, use Prism.js or highlight.js
+  - No syntax highlighting library integrated
+  - Tool call content rendered as plain <pre>
+
+P4.36 Subagent (Task Tool) Tracking Missing ► specs/logging-telemetry.md:183-230
+  - No SubagentTracker interface or display
+  - No spinner with elapsed time during Task execution
+  - dashboard/src/components/SubagentIndicator.tsx missing
+
+P4.37 Network Monitoring/Audit Logging Missing ► specs/networking.md:158-161
+  - Spec: Auditability - all allowed destinations explicitly listed
+  - No runtime monitoring of blocked/allowed connections
+  - No iptables logging rules
+  - Would help debug connectivity issues
+
+P4.38 Error Display Formatting Incomplete ► ActivityLog.tsx:81-93
+  - ClaudeResultEvent error subtype handled
+  - But timeout and docker errors not displayed inline
+  - UX improvement for error visibility
+
+P4.39 Missing Layer Dependency Documentation ► services/*.ts
+  - Layer composition dependencies not documented in service files
+  - Must read layer implementation to understand dependencies
+  - layers/index.ts:14-27 has comments but service files don't
+
+P4.40 Test Layers Don't Use satisfies Pattern ► layers/test/*.ts
+  - Production layers use satisfies for type verification
+  - Test layers use as any without verification
+  - Test mocks might not match actual service interfaces
+
+New P5 Items (Jan 2026 - Iteration 17):
+
+P5.56 Model Flag Not in Spec ► ClaudeLive.ts:27,76
+  - --model claude-opus-4-5-20251101 hardcoded in implementation
+  - Flag not documented in specs/claude-integration.md:17-24
+  - Either document or make configurable
+
+P5.57 Inconsistent ICMP Reject Type ► docker/init-firewall.sh:137
+  - Spec: icmp-port-unreachable
+  - Implementation: icmp-admin-prohibited
+  - Both work but minor consistency issue
+
+P5.58 FeatureEvent Never Broadcasted ► types.ts:46-52
+  - FeatureEvent type defined but never emitted
+  - Only "features" (bulk) events sent, no individual feature updates
+
+P5.59 Terminal Component Unused ► dashboard/src/components/Terminal.tsx
+  - Full xterm implementation exists (93 lines)
+  - Never imported or used in App.tsx
+  - App uses ActivityLog instead
+
+P5.60 FeaturesFile Interface Not Exported ► types.ts
+  - Spec defines interface FeaturesFile { features: Feature[] }
+  - Code uses inline type { features: Feature[] } instead
+  - Not functional gap but type organization issue
+
+P5.61 ConfigTest Uses Different Factory ► layers/test/ConfigTest.ts:10
+  - Uses ConfigService.of({...}) factory
+  - Other test layers use Layer.succeed(Service, mock)
+  - Inconsistent pattern
+
+New P6 Items (Jan 2026 - Iteration 17):
+
+P6.52 parseNDJSON vs parseNDJSONWithFallback ► ndjson.ts, specs/claude-integration.md:118
+  - Spec: Invalid JSON lines skipped, stream continues
+  - parseNDJSON fails stream on JSON parse error
+  - Only parseNDJSONWithFallback skips - but not used for Claude events
+
+P6.53 Dockerfile Uses cp Instead of ln -s ► docker/Dockerfile.base:48-57
+  - Spec shows symlinking bun/claude binaries from /root
+  - Implementation uses cp (copy)
+  - Both work but spec doesn't match implementation
+
+P6.54 Missing .claude and templates Volume Mount in Spec ► specs/container.md:68
+  - program.ts:38-39 mounts ~/.claude and templates directories
+  - Not mentioned in container creation spec section
+  - Undocumented volume mounts
+
+P6.55 Thinking Blocks Shown vs Hidden ► ActivityLog.tsx:51-59, specs/logging-telemetry.md:166-168
+  - Spec: Thinking blocks hidden by default, no toggle needed
+  - Implementation: Creates items with expanded:false (collapsed but visible)
+  - Minor deviation - shows collapsed vs hidden entirely
+
+Iteration 17 Dependency Graph Additions:
+P1.204 Event Streaming ───────────────► Dashboard real-time functionality (CRITICAL)
+P1.205 Dashboard mainLoop ────────────► P1.204 Event Streaming (requires)
+P1.206 Step Mode ─────────────────────► P1.205 Dashboard mainLoop (requires)
+P1.207 listByPrefix Bug ──────────────► P1.9 Startup Cleanup (blocks)
+P1.208 JSONL Persistence ─────────────► P3.28 LoggingService (same, confirms P1)
+P1.209 State Recovery ────────────────► P1.208 JSONL Persistence (requires)
+P1.210 Timeout Config ────────────────► P1.57 One-Hour Timeout (related)
+P1.211 SSH Mount Path ────────────────► P1.23 Git Config (blocks SSH operations)
+P1.212 safe.directory ────────────────► P1.23 Git Config (related)
+P1.213 verify_command ────────────────► ZFC compliance (intentional delegation)
+P1.214 DashboardLive Endpoints ───────► P2.64 Duplicate Dashboard (consolidation)
+P2.70-P2.72 Type Mismatches ──────────► Type safety improvements
+P2.73-P2.74 Iteration Tracking ───────► P1.208 JSONL Persistence (requires)
+P2.75-P2.78 Dashboard Event Types ────► Spec alignment
+P2.79 Error Type Duplication ─────────► P6.50 Context.Tag Workaround (related)
+P2.80 Feature State Tracking ─────────► Dashboard feature status display
+P2.81 JSON Error Handling ────────────► P1.201 Malformed JSON (extends)
+P2.82 GitHub .packages ───────────────► Network isolation completeness
+P3.36-P3.43 Various ──────────────────► Robustness and UX improvements
+P4.34-P4.40 Various ──────────────────► Polish and documentation
+P5.56-P5.61 Various ──────────────────► Minor consistency issues
+P6.52-P6.55 Various ──────────────────► Documentation and minor deviations
+
+Summary (Iteration 17):
+- 11 new P1 items (P1.204-P1.214) - Critical integration gaps
+- 13 new P2 items (P2.70-P2.82) - Type safety and data integrity
+- 8 new P3 items (P3.36-P3.43) - Robustness improvements
+- 7 new P4 items (P4.34-P4.40) - Polish and documentation
+- 6 new P5 items (P5.56-P5.61) - Minor consistency
+- 4 new P6 items (P6.52-P6.55) - Informational
+- Total new items: 49
+
+Running totals:
+- P1 items: 214 (was 203)
+- P2 items: 82 (was 69)
+- P3 items: 43 (was 35)
+- P4 items: 40 (was 33)
+- P5 items: 61 (was 55)
+- P6 items: 55 (was 51)
+- Grand total: 495 items (was 446)
 ```
