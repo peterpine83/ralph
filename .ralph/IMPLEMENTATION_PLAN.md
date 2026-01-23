@@ -94,6 +94,51 @@
   - Add to loop condition: `state.iteration < maxIterations`
   - Currently circuit breaker (3 no-change) is only exit besides feature completion
 
+### 1.9 Startup Cleanup (Moved from P4.4)
+- [ ] Clean up stale containers on startup (refs: specs/orchestrator.md:10-21, ralph.ts:136-142)
+  - **CRITICAL**: Must run BEFORE createSession() per spec
+  - Implement `cleanupStaleContainers()` function
+  - Use DockerService.listByPrefix("ralph-") to find orphaned containers
+  - Remove stale containers before starting new session
+  - Add to main.ts startup sequence, not createSession
+
+### 1.10 Container Health Checks
+- [ ] Implement ensureContainerRunning() function (refs: specs/orchestrator.md:28, ralph.ts:144-152)
+  - Called at start of each iteration before running Claude
+  - Use DockerService.inspect() to check container state
+  - Auto-restart with DockerService.start() if stopped
+  - Fail iteration if container cannot be restarted
+
+### 1.11 Branch Name Generation
+- [ ] Implement branch naming for new sessions (refs: specs/orchestrator.md branch naming, ralph.ts:50-68)
+  - Build mode: `ralph/MMDD-HHMM-{feature-slug}` pattern
+  - Plan mode: `ralph/MMDD-HHMM-plan` pattern
+  - Functions exist in ralph.ts:50-68 as reference
+  - Wire to createSession() for non-resume sessions
+
+### 1.12 Features.json Copying (Build Mode)
+- [ ] Copy features.json to container for build mode (refs: ralph.ts:217-227)
+  - Skip for plan mode (uses .ralph-prompt.md instead)
+  - Ensure .ralph directory exists in container
+  - Use DockerService.writeFile() or copyToContainer()
+  - Required before first iteration in build mode
+
+### 1.13 Resume vs New Session Logic
+- [ ] Implement branch resume detection (refs: ralph.ts:381-397)
+  - Check if --branch specified
+  - Verify branch exists on remote: `git ls-remote --heads origin ${branch}`
+  - Set isResume flag for checkout vs create logic
+  - Error if specified branch doesn't exist on remote
+  - Different flow: resume → checkout existing, new → create branch
+
+### 1.14 Plan Mode Completion Detection
+- [ ] Detect when planning is complete (refs: ralph.ts:613-626)
+  - After each iteration in plan mode, check:
+    1. PR exists: `gh pr view HEAD --json url`
+    2. No unpushed commits: compare origin/branch..HEAD
+  - If both true, Claude is signaling completion → exit gracefully
+  - Different from build mode completion (feature-based)
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -122,6 +167,14 @@
   - GET/PUT /prompt endpoints exist in server.ts
   - Not connected to actual prompt used in runIteration
   - Read template from DashboardState or file system
+
+### 2.5 Interactive CLI Prompts (Step Mode)
+- [ ] Implement CLI prompt for step mode without dashboard (refs: ralph.ts:106-132)
+  - `promptForAction()` function for async stdin/stdout interaction
+  - After each iteration when stepMode enabled and NOT using dashboard
+  - Show prompt: `[c]ontinue, [s]top` with default continue on empty
+  - Race CLI input against dashboard resume when both active
+  - Required for step-by-step debugging without browser
 
 ---
 
@@ -166,33 +219,19 @@
 
 ## Priority 4: Robustness Improvements
 
-### 4.1 Container Health Checks
-- [ ] Implement proper container health monitoring
-  - Currently basic running check via docker inspect
-  - Add application-level health endpoints
-  - Auto-recovery on container failures
-
-### 4.2 Git Error Recovery
+### 4.1 Git Error Recovery
 - [ ] Improve git operation error handling (refs: src/layers/GitLive.ts)
   - Handle merge conflicts gracefully
   - Retry transient failures
   - Better error messages for common issues
 
-### 4.3 Timeout Handling Improvements
+### 4.2 Timeout Handling Improvements
 - [ ] Add progress-aware timeout (refs: specs/claude-integration.md:132-142)
   - Currently uses fixed 10-minute timeout
   - Extend timeout if Claude is making progress (streaming events)
   - Add configurable timeout via CLI
 
-### 4.4 Startup Cleanup (Should be P1 per specs)
-- [ ] Clean up stale containers on startup (refs: specs/orchestrator.md:10-21)
-  - Per specs, `cleanupStaleContainers()` should run BEFORE `createSession()`
-  - Use DockerService.listByPrefix("ralph-") to find orphaned containers
-  - Remove stale containers before starting new session
-  - Add to main.ts startup sequence, not createSession
-  - Note: Spec priority is higher than current P4 placement
-
-### 4.5 Error Recovery with Retry Logic
+### 4.3 Error Recovery with Retry Logic
 - [ ] Implement retry with exponential backoff for transient failures
   - Docker operations: network errors, daemon restarts
   - Git operations: remote connectivity, lock conflicts
@@ -273,12 +312,15 @@
 
 ### Dual Orchestration Implementations (Critical)
 - Legacy: `/workspace/ralph.ts` - Active, used in production, ~650 lines
-  - Has working: signal handling, firewall detection, step mode, event streaming
+  - Has working: signal handling, firewall detection, step mode, event streaming, CLI prompts
+  - Has working: branch generation, features.json copying, resume logic, plan mode completion
   - Uses: Bun.spawn, Bun.$, direct process management
 - Effect-based: `/workspace/src/main.ts` + `/workspace/src/program.ts` - In development
   - Has working: service interfaces, layer composition, test infrastructure
   - Missing: wiring to createSession, cleanup, signal handling, step mode
+  - Missing: branch generation, features copying, resume logic, plan completion detection
 - The Effect implementation needs to replicate all working features from ralph.ts
+- **Migration Strategy**: ralph.ts serves as working reference for all P1 features
 
 ### Branch Naming Logic Exists
 - `generateContainerName()` in `/workspace/src/container.ts` generates timestamps
@@ -296,12 +338,20 @@
 - Consistent with specs but worth noting for future flexibility
 
 ### Missing Test Coverage Areas
-- 0% coverage on service layer implementations (DockerLive, ClaudeLive, GitLive, ConfigLive, DashboardLive)
+- 0% coverage on service layer implementations (~931 lines total):
+  - DockerLive.ts: 324 lines
+  - ClaudeLive.ts: 137 lines
+  - GitLive.ts: 140 lines
+  - ConfigLive.ts: 67 lines
+  - DashboardLive.ts: 216 lines
+  - layers/index.ts: 47 lines
 - 0% coverage on createSession() function (177 lines, critical path)
-- 0% coverage on dashboard server endpoints (server.ts, 301 lines)
+- 0% coverage on dashboard server endpoints (server.ts, 300 lines)
 - 0% coverage on main.ts entry point (69 lines)
 - No integration tests for full orchestration lifecycle
 - ~59% coverage on ndjson.ts (parseNDJSON tested, 4 other utilities untested)
+- Test-to-code ratio: ~54% (1,260 test lines / 2,351 source lines)
+- Currently tested: args, container, errors, program logic (with mocks), parseNDJSON
 
 ### Hardcoded Values Requiring Attention
 - Claude model: `"claude-opus-4-5-20251101"` hardcoded in ClaudeLive.ts (lines 27, 76)
@@ -372,29 +422,43 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 8 items | Blocking basic functionality |
-| P2 | Dashboard Integration | 4 items | Core UX features |
+| P1 | Critical Integration | 14 items | Blocking basic functionality |
+| P2 | Dashboard Integration | 5 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
-| P4 | Robustness | 5 items | Production readiness (note: P4.4 should be P1) |
+| P4 | Robustness | 4 items | Production readiness |
 | P5 | Test Coverage | 5 items | Quality assurance |
 
 ### Dependency Graph
 ```
-P1.1 Main Entry Point ─────┬─► P1.5 Signal Handling
-     │                      │
-     ├─► P1.2 Firewall Ready Detection
-     │
-     ├─► P1.3 copyToContainer (optional, for bulk ops)
-     │
-     ├─► P1.4 Final Verification Logic
-     │
-     ├─► P1.6 Environment Validation
-     │
-     ├─► P1.7 --once Flag Handling
-     │
-     └─► P1.8 maxIterations Enforcement
+P1.9 Startup Cleanup ─────► P1.1 Main Entry Point (cleanup runs FIRST)
+                                  │
+P1.6 Environment Validation ──────┤
+                                  │
+                                  ├─► P1.10 Container Health Checks
+                                  │
+                                  ├─► P1.11 Branch Name Generation
+                                  │         │
+                                  │         └─► P1.13 Resume vs New Session
+                                  │
+                                  ├─► P1.12 Features.json Copying (build mode)
+                                  │
+                                  ├─► P1.2 Firewall Ready Detection
+                                  │
+                                  ├─► P1.3 copyToContainer (optional, for bulk ops)
+                                  │
+                                  ├─► P1.4 Final Verification Logic
+                                  │
+                                  ├─► P1.5 Signal Handling
+                                  │
+                                  ├─► P1.7 --once Flag Handling
+                                  │
+                                  ├─► P1.8 maxIterations Enforcement
+                                  │
+                                  └─► P1.14 Plan Mode Completion Detection
 
 P2.* Dashboard ────────────► Requires P1.1 complete first
+     │
+     └─► P2.5 Interactive CLI Prompts (can test without dashboard)
 
 P3.* Logging ──────────────► Can proceed in parallel with P2
 
