@@ -5233,3 +5233,329 @@ Running totals:
 - P5 items: 72 (was 70)
 - P6 items: 68 (unchanged)
 - Grand total: 617 items (was 606)
+
+---
+
+## Iteration 22 Research (Jan 2026)
+
+### Research Focus Areas
+1. Test coverage and implementation quality analysis
+2. Docker/container implementation vs spec gaps
+3. Effect.js patterns and potential issues
+4. Dashboard spec compliance verification
+5. Features.json processing pipeline validation
+
+### New P1 Items (Critical Gaps)
+
+P1.250 SSH Volume Mount Path Mismatch ► src/program.ts:37, docker/entrypoint.sh:15, ralph.ts:167
+  - Gap: Three conflicting SSH mount paths in codebase
+  - program.ts:37 mounts to `/root/.ssh`
+  - ralph.ts:167 (working) mounts to `/home/node/.ssh`
+  - entrypoint.sh:15 expects `/home/node/.ssh`
+  - Impact: Git authentication breaks in Effect implementation
+  - Fix: Use `/home/node/.ssh` consistently (node user runs as UID 1000)
+
+P1.251 listByPrefix Wrong Implementation ► src/layers/DockerLive.ts:292-318, src/services/Docker.ts:120-123
+  - Gap: Method lists FILES inside container, not CONTAINERS on host
+  - Signature: `(containerName, prefix)` should be just `(prefix)`
+  - Implementation uses `find /workspace` instead of `docker ps --filter`
+  - Impact: cleanupStaleContainers() cannot find orphaned containers
+  - Fix: Reimplement to query Docker host for containers matching prefix
+
+P1.252 Claude Volume Read-Only Breaks Writes ► src/program.ts:38
+  - Gap: Claude config mounted as `:ro` but Claude CLI may write to it
+  - Working code (ralph.ts:168) uses `:rw`
+  - Impact: Claude Code may fail when writing to config/plugins/cache
+  - Fix: Change to `:rw` to match working implementation
+
+P1.253 Templates Path Uses Wrong Base ► src/program.ts:39
+  - Gap: Uses `process.cwd()` instead of script directory
+  - Working code (ralph.ts:72) uses `import.meta.dir` for RALPH_HOME
+  - Impact: Template mount fails when invoked from different directory
+  - Fix: Use `import.meta.dir` or resolve path relative to script
+
+P1.254 Missing .gitconfig Volume Mount ► src/program.ts:36-40
+  - Gap: New implementation doesn't mount host `.gitconfig`
+  - Working code (ralph.ts:169) includes `-v ~/.gitconfig:/home/node/.gitconfig:ro`
+  - Impact: Git operations may use wrong author or config
+  - Fix: Add gitconfig volume mount to program.ts
+
+P1.255 Missing GIT_AUTHOR Environment Variables ► src/program.ts:41-44
+  - Gap: Missing `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `ANTHROPIC_API_KEY`
+  - Working code (ralph.ts:170-174) passes all three
+  - Impact: Git commits have wrong/missing author information
+  - Fix: Add environment variables from config or env
+
+P1.256 getRemainingFeatures Throws on Invalid JSON ► src/container.ts:41-44
+  - Gap: `JSON.parse()` without try/catch
+  - Returns Effect type but throws synchronous exception
+  - Impact: Malformed features.json crashes orchestrator
+  - Fix: Wrap in Effect.try() and return ValidationError
+
+P1.257 No .features Property Validation ► src/container.ts:42
+  - Gap: Accesses `parsed.features` without checking existence
+  - Impact: TypeError if JSON lacks features array
+  - Fix: Validate structure before accessing .features
+
+P1.258 No Feature Field Type Validation ► src/container.ts:43
+  - Gap: Filter assumes `passes` is boolean
+  - String "false" is truthy, causes incorrect filtering
+  - Impact: Features with wrong types get filtered incorrectly
+  - Fix: Add type guard for passes field
+
+P1.259 Stream Scoping Issue in ClaudeLive ► src/layers/ClaudeLive.ts:69-134
+  - Gap: `Stream.unwrap` on scoped `execStream` may close scope prematurely
+  - docker.execStream returns Effect.scoped at DockerLive.ts:220
+  - Unwrapping doesn't maintain scope lifecycle
+  - Impact: Stream may fail or hang when underlying process scope closes
+  - Fix: Restructure to keep scope open while stream is consumed
+
+P1.260 No Cleanup Finally Block in main.ts ► src/main.ts:52-68
+  - Gap: No Effect.ensuring or finally block for container cleanup
+  - Spec requires cleanup in finally (orchestrator.md:48-50)
+  - Impact: Crashed/interrupted runs leave orphaned containers
+  - Fix: Add Effect.ensuring to remove container on any exit
+
+P1.261 Generic Error Handler Loses Type Info ► src/main.ts:64-67
+  - Gap: `Effect.catchAll` converts all errors to string
+  - No specific handling for ConfigError vs DockerError vs TimeoutError
+  - Impact: Cannot differentiate recoverable from fatal errors
+  - Fix: Use catchTags for specific error type handling
+
+P1.262 CircuitBreakerError Not Caught ► src/program.ts:325-330, src/main.ts
+  - Gap: Effect.fail(CircuitBreakerError) has no catchTag handler
+  - Error propagates to generic catchAll
+  - Impact: Circuit breaker exit indistinguishable from other failures
+  - Fix: Add specific catchTag for graceful circuit breaker exit
+
+P1.263 Effect.runSync Without Error Handling ► src/layers/DashboardLive.ts:127,136,145
+  - Gap: Three runSync calls in ReadableStream callbacks with no error handling
+  - Effect.runSync throws if effect fails
+  - Impact: Ref operation failure crashes SSE stream
+  - Fix: Wrap in try-catch or use Effect.runSyncExit
+
+P1.264 No Retry Logic Anywhere ► Multiple files
+  - Gap: No Effect.retry or Stream.retry in entire codebase
+  - Spec classifies DockerError as recoverable (orchestrator.md:232)
+  - Impact: Transient failures cause immediate orchestrator exit
+  - Fix: Add retry with backoff for recoverable errors
+
+P1.265 Test Coverage Only 30-40% ► Multiple test files
+  - Gap: 1,263 lines of tests for ~3,000+ lines of implementation
+  - 0% coverage for: DockerLive, ClaudeLive, GitLive, ConfigLive, DashboardLive
+  - 0% coverage for: main.ts, server.ts, createSession()
+  - 0% coverage for: All dashboard frontend (React components)
+  - Impact: Refactoring/changes may break untested code paths
+  - Fix: Add integration tests for live layers, unit tests for critical paths
+
+### New P2 Items (Architecture & Type Safety)
+
+P2.105 Dual Server Implementation Confusion ► src/server.ts, src/layers/DashboardLive.ts
+  - Gap: Two complete dashboard server implementations exist
+  - server.ts: 301 lines with mutable global state
+  - DashboardLive.ts: 217 lines with Effect Ref state
+  - Neither integrated with orchestrator (main.ts, program.ts)
+  - Impact: Unclear which to use, potential maintenance burden
+  - Fix: Choose one implementation, remove or deprecate other
+
+P2.106 State Management Split ► src/server.ts:9, src/layers/DashboardLive.ts:14
+  - Gap: server.ts uses mutable global `state` object
+  - DashboardLive.ts uses Effect `Ref` for state
+  - Both implement separate broadcast logic
+  - Impact: State synchronization issues if both used
+  - Fix: Consolidate to single state management approach
+
+P2.107 Missing FeatureEvent Handler ► dashboard/src/App.tsx:26-44
+  - Gap: Client handles `state`, `iteration`, `features`, `claude_event`, `output`
+  - Does not handle `feature` (individual feature updates)
+  - Type defined in src/types.ts:46-52 but never used
+  - Impact: Individual feature updates not reflected in UI
+  - Fix: Add handler or remove unused type
+
+P2.108 Tool Calls Collapsed by Default ► dashboard/src/components/ActivityLog.tsx:74
+  - Gap: Tool use events created with `expanded: false`
+  - Spec requires `expanded: true` (logging-telemetry.md:115-124)
+  - Impact: User must click to expand every tool call
+  - Fix: Change default to `expanded: true`
+
+P2.109 execStream Scoped Effect Misuse ► src/layers/DockerLive.ts:220-243
+  - Gap: Returns streams from Effect.scoped without ensuring scope lifecycle
+  - When calling code consumes stream, scope may already be closed
+  - Impact: Potential stream failures or process leaks
+  - Fix: Document scope requirements or restructure pattern
+
+P2.110 copyToContainer Uses Effect.die ► src/layers/DockerLive.ts:290
+  - Gap: Unimplemented method uses `Effect.dieMessage`
+  - Service interface declares `Effect<void, DockerError>` at Docker.ts:111
+  - Effect.die is unrecoverable defect, not typed error
+  - Impact: Any call to copyToContainer crashes process
+  - Fix: Return Effect.fail(DockerError) or implement method
+
+P2.111 Redundant Git Configuration in Session ► src/program.ts:120-167, docker/entrypoint.sh:23-33
+  - Gap: Both orchestrator and entrypoint configure git
+  - Entrypoint dynamically detects key type (rsa vs ed25519)
+  - Orchestrator hardcodes id_rsa path
+  - Impact: Orchestrator may override correct entrypoint config
+  - Fix: Let entrypoint handle all git config, remove from orchestrator
+
+### New P3 Items (Robustness)
+
+P3.67 No Feature ID Uniqueness Validation ► src/container.ts
+  - Gap: Duplicate feature IDs never detected
+  - Multiple features with same ID cause ambiguous state
+  - Impact: Commit messages, progress tracking become unclear
+  - Fix: Validate ID uniqueness before processing
+
+P3.68 No Backward Transition Detection ► src/program.ts:237
+  - Gap: Nothing prevents `passes: true → false` transitions
+  - Could indicate regression or Claude error
+  - Impact: Silent feature regression goes unnoticed
+  - Fix: Warn or error if completed feature becomes incomplete
+
+P3.69 verify_command Never Executed by Orchestrator ► src/container.ts, src/program.ts
+  - Gap: Orchestrator trusts Claude to run verification
+  - No independent verification by orchestrator
+  - Impact: Claude can skip verification, mark features complete incorrectly
+  - Fix: Optional orchestrator-side verification after Claude marks complete
+
+P3.70 Silent JSON Parse Error in Dashboard ► ralph.ts:474-480
+  - Gap: Parse errors caught and silently ignored
+  - Dashboard shows stale data without notification
+  - Impact: User unaware of features.json corruption
+  - Fix: Log warning or show error state in dashboard
+
+P3.71 Empty Features Array Ambiguity ► src/container.ts:41-44
+  - Gap: No distinction between "no features defined" vs "all complete"
+  - Both return empty array
+  - Impact: Confusing exit conditions
+  - Fix: Return discriminated union or add metadata
+
+P3.72 Missing Test Coverage for Live Layers ► src/layers/*.ts
+  - Gap: 0% test coverage for DockerLive (325 lines), ClaudeLive (138 lines),
+    GitLive (141 lines), ConfigLive (68 lines), DashboardLive (217 lines)
+  - Tests only cover mocked behavior
+  - Impact: Bugs in actual Docker/Git/Claude integration undetected
+  - Fix: Add integration tests with real Docker commands
+
+P3.73 No Test Coverage for Server or Dashboard ► src/server.ts, dashboard/src/
+  - Gap: 0% test coverage for server (301 lines) and all React components
+  - Impact: UI bugs, SSE issues, endpoint errors go undetected
+  - Fix: Add server endpoint tests and React component tests
+
+P3.74 parseNDJSONWithFallback Not Tested ► src/streams/ndjson.ts:41-60
+  - Gap: Function exists but no test coverage
+  - Also untested: fromReadableStream, collectAll, forEach
+  - Impact: Stream utility bugs may cause silent failures
+  - Fix: Add tests for all stream utility functions
+
+### New P4 Items (Polish)
+
+P4.59 No Syntax Highlighting in Tool Calls ► dashboard/src/components/ActivityLog.tsx:236
+  - Gap: Code displayed in `<pre>` with monospace styling only
+  - Spec mentions Prism.js or highlight.js (logging-telemetry.md:126-138)
+  - Impact: Reduced readability of code in tool output
+  - Fix: Add syntax highlighting library and language detection
+
+P4.60 No Loading States in Dashboard ► dashboard/src/App.tsx
+  - Gap: No loading indicators during SSE connection
+  - No skeleton screens, no loading state for control actions
+  - Impact: State transitions appear instant without feedback
+  - Fix: Add loading states for async operations
+
+P4.61 No Error Feedback in Dashboard UI ► dashboard/src/hooks/useSSE.ts:21-24
+  - Gap: JSON parse errors silently ignored
+  - Reconnection happens without user notification
+  - Control actions have no error handling
+  - Impact: Users unaware of connection errors or failed actions
+  - Fix: Add error toast/notification system
+
+P4.62 Missing ARIA Labels for Accessibility ► dashboard/src/
+  - Gap: No ARIA labels anywhere in dashboard components
+  - No role attributes, missing keyboard navigation
+  - Expandable items lack Enter/Space support
+  - Impact: Screen reader users cannot navigate dashboard
+  - Fix: Add ARIA labels, roles, and keyboard event handlers
+
+P4.63 Fixed Sidebar Width Not Responsive ► dashboard/src/App.tsx:155
+  - Gap: Sidebar fixed at 320px width
+  - No media queries, no mobile layouts
+  - Impact: Layout breaks on narrow screens (<768px)
+  - Fix: Add responsive breakpoints and collapsible sidebar
+
+### New P5 Items (Consistency)
+
+P5.73 Test Mocks Use `as any` Workaround ► src/layers/test/*.ts
+  - Gap: 20+ instances of `as any` to work around Context.Tag interface
+  - Comments reference "Context.Tag interface/class shadowing issue"
+  - Impact: Type safety reduced in test code
+  - Note: Consistent pattern, may need Effect-specific solution
+
+P5.74 Layer Composition Uses Mixed Patterns ► src/layers/index.ts:28-40
+  - Gap: Uses Layer.mergeAll then chained Layer.provideMerge
+  - Not incorrect but obscures dependency relationships
+  - Impact: Harder to understand layer dependencies
+  - Fix: Standardize on consistent composition pattern
+
+P5.75 server.ts May Be Orphaned Code ► src/server.ts
+  - Gap: Full 299-line implementation not imported anywhere
+  - May be older pre-Effect implementation
+  - Impact: Maintenance burden if not used
+  - Investigate: Determine if dead code or intentionally separate
+
+### New P6 Items (Minor)
+
+P6.69 parseStaleContainers/parseContainerRunning Only in Tests ► src/container.ts:27-36
+  - Gap: Functions exist and tested but not used in production
+  - DockerLive.inspect() parses output directly
+  - Status: Low priority - either integrate or document as test helpers
+
+P6.70 Terminal Component CSS Still Loaded ► dashboard/src/main.tsx:3
+  - Gap: 93-line xterm Terminal component never imported but CSS loads
+  - Extends P5.66 (Terminal component unused)
+  - Impact: Unnecessary CSS bundle size
+  - Fix: Remove component and CSS import if truly unused
+
+---
+
+Iteration 22 Dependency Graph Additions:
+P1.250-255 Container Setup ──────────► Critical path for basic operation
+  └─ P1.250 SSH Mount Path ──────────► Git authentication
+  └─ P1.251 listByPrefix ────────────► P1.9 Startup Cleanup
+  └─ P1.252-254 Volume Issues ───────► Claude and template access
+  └─ P1.255 Missing Env Vars ────────► P1.6 Env Validation
+
+P1.256-258 Features Validation ──────► Runtime safety for features.json
+  └─ P1.256 JSON Parse Safety ───────► P3.59 (extends)
+  └─ P1.257-258 Schema Validation ───► P1.248-249 (extends)
+
+P1.259-264 Effect Patterns ──────────► Correctness and robustness
+  └─ P1.259 Stream Scoping ──────────► P2.109 (related)
+  └─ P1.260 Cleanup ─────────────────► P1.11 (already flagged)
+  └─ P1.261-262 Error Handling ──────► Main entry robustness
+  └─ P1.263 Effect.runSync ──────────► DashboardLive safety
+  └─ P1.264 Retry Logic ─────────────► All recovery scenarios
+
+P1.265 Test Coverage ────────────────► Quality assurance
+P2.105-111 Architecture ─────────────► Code organization and clarity
+P3.67-74 Robustness ─────────────────► Error handling and edge cases
+P4.59-63 Polish ─────────────────────► Dashboard improvements
+P5.73-75 Consistency ────────────────► Code patterns
+P6.69-70 Minor ──────────────────────► Cleanup items
+
+Summary (Iteration 22):
+- 16 new P1 items (P1.250-P1.265) - Container setup, validation, Effect patterns
+- 7 new P2 items (P2.105-P2.111) - Architecture and type safety
+- 8 new P3 items (P3.67-P3.74) - Robustness and test coverage
+- 5 new P4 items (P4.59-P4.63) - Dashboard polish
+- 3 new P5 items (P5.73-P5.75) - Consistency patterns
+- 2 new P6 items (P6.69-P6.70) - Minor cleanup
+- Total new items: 41
+
+Running totals:
+- P1 items: 265 (was 249)
+- P2 items: 111 (was 104)
+- P3 items: 74 (was 66)
+- P4 items: 63 (was 58)
+- P5 items: 75 (was 72)
+- P6 items: 70 (was 68)
+- Grand total: 658 items (was 617)
