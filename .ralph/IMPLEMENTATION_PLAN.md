@@ -2677,6 +2677,29 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - **Major Finding**: Circuit breaker check happens AFTER loop exits - timing bug may prevent error reporting
 
 **Key Findings Iteration 8 (Jan 2026 - Parallel 3-Agent Research)**:
+**Key Findings Iteration 13 (Jan 2026 - Deep Type Safety & Test Coverage Analysis)**:
+- **NEW P1.155-P1.165**: 11 new P1 items from type safety analysis
+  - P1.155: Generic JSON parse without runtime validation (ndjson.ts)
+  - P1.156: Request body type assertions without validation (server.ts)
+  - P1.157: Non-null assertion in SSE cancel callback (DashboardLive.ts)
+  - P1.158: `any` instead of `unknown` in error handler (ClaudeLive.ts)
+  - P1.159: Defined but unused error types (ContainerNotFoundError, FeatureError, ValidationError)
+  - P1.160: Effect.catchAll loses type discrimination (main.ts)
+  - P1.161: No retry logic for transient failures (all layers)
+  - P1.162: Docker inspect partial failure (DockerLive.ts)
+  - P1.163: Git dual command partial failure (GitLive.ts)
+  - P1.164: String-based timeout tag check fragility (ClaudeLive.ts)
+  - P1.165: DashboardError interface without class implementation
+- **NEW P2.56-P2.57**: 2 new P2 items (error display, prompt display in dashboard)
+- **NEW P3.27**: JSONL session file writing not implemented
+- **NEW P4.24-P4.27**: 4 new P4 items (model version, timeout, MIME types, console localhost)
+- **NEW P5.33-P5.38**: 6 new P5 items (stream utility tests, array assertions, service layer tests)
+- **NEW P6.38-P6.41**: 4 new P6 items (as any workarounds, type inconsistencies, error truncation)
+- **Analysis Coverage**: Type safety (11 issues), Test coverage (6 gaps), Error handling (5 issues)
+- **Major Finding**: Stream utilities (ndjson.ts) have only parseNDJSON tested; 4 other utilities completely untested
+- **Security Note**: P1.155-P1.156 are lower priority than P1.49/P1.81/P1.82 command injections
+
+**Key Findings Iteration 8 (Jan 2026 - Comprehensive Gap Analysis)**:
 - **NEW P1.108-P1.117**: 10 new P1 items from comprehensive gap analysis
   - P1.108: DashboardLive missing REST endpoints (CRITICAL - dashboard non-functional without these)
   - P1.109: onStopCallback registration for dashboard stop button
@@ -3275,4 +3298,199 @@ P6.37 Effect Implementation Gap ──► program.ts vs ralph.ts
   - Legacy ralph.ts implements all spec features
   - Effect src/program.ts missing: cleanup stale containers, ensure running, step mode, final verification
   - Two parallel implementations create maintenance burden
+
+New P1 Items (Jan 2026 - Iteration 13):
+P1.155 Generic JSON Parse Type Safety ► src/streams/ndjson.ts:24,54
+  - JSON.parse() result cast to generic `T` without runtime validation
+  - `JSON.parse(line) as T` assumes structure matches expected type
+  - Add zod/io-ts schema validation or type guard function
+  - Affects parseNDJSON() and parseNDJSONWithFallback()
+
+P1.156 Request Body Type Assertions ──► server.ts:246,275
+  - `req.json() as { enabled: boolean }` lacks runtime validation
+  - `req.json() as { template: string }` same issue
+  - Malformed requests pass type assertions silently
+  - Add JSON schema validation before type assertion
+
+P1.157 Non-Null Assertion in SSE Cancel ► DashboardLive.ts:148
+  - `newClients.delete(clientController!)` uses non-null assertion
+  - TypeScript doesn't narrow type inside nested cancel() callback
+  - Could be undefined if cancel called before controller assigned
+  - Store controller reference before ReadableStream creation
+
+P1.158 any Instead of unknown in ClaudeLive ► ClaudeLive.ts:120
+  - `Stream.mapError((e: any) => {` should use `unknown`
+  - Allows accidental property access without type checking
+  - Change to `(e: unknown)` and use proper type guards
+
+P1.159 Unused Error Types Definition Gap ► errors/index.ts
+  - ContainerNotFoundError defined (line 20-22) but never instantiated
+  - FeatureError defined (line 46-50) but never instantiated
+  - ValidationError defined (line 63-67) but never instantiated
+  - Either use these error types or remove them
+
+P1.160 Effect.catchAll Loses Type Info ► main.ts:64
+  - Uses `Effect.catchAll` instead of `Effect.catchTag`
+  - All errors stringified identically, losing type discrimination
+  - Should use catchTag for CircuitBreakerError, TimeoutError, etc.
+  - Pattern: specific handlers for expected errors, catchAll as fallback
+
+P1.161 No Retry Logic for Transient Failures ► src/layers/*.ts
+  - No usage of Effect.retry anywhere in codebase
+  - Docker operations fail immediately without retry
+  - Git push failures should retry with exponential backoff
+  - Add Effect.retry with Schedule for network operations
+
+P1.162 Docker Inspect Partial Failure ► DockerLive.ts:137-197
+  - Makes 3 separate docker inspect calls (lines 140-157, 160-177, 180-197)
+  - If first call succeeds but second fails, partial data is lost
+  - Should use single inspect call with JSON format
+  - Or atomic operation with all-or-nothing semantics
+
+P1.163 Git Dual Command Partial Failure ► GitLive.ts:77-110
+  - hasUnpushedCommits makes 2 sequential git commands
+  - Branch command at lines 80-91, log command at 94-107
+  - If branch succeeds but log fails, no cleanup
+  - Add transaction pattern or atomic operation
+
+P1.164 String-Based Timeout Tag Check ► ClaudeLive.ts:54,121
+  - `e._tag === "TimeoutException"` is fragile string comparison
+  - Effect might change tag structure in future versions
+  - Use Effect's provided type guards or pattern matching
+  - Replace with `Effect.isTimeoutException(e)` or similar
+
+P1.165 DashboardError Interface Only ► services/Dashboard.ts:4-8
+  - Interface defined but no corresponding Data.TaggedError class
+  - Cannot use with Effect.catchTag() pattern
+  - DashboardLive never throws this error type
+  - Create matching class in errors/index.ts
+
+New P2 Items (Jan 2026 - Iteration 13):
+P2.56 Error Display in Activity Log ──► Dashboard UI (spec: logging-telemetry.md:287-298)
+  - Inline error events for timeouts, failures, docker errors
+  - Format: box with ⚠️ icon and error details
+  - Update iteration card status to show failure (✗)
+  - Currently errors not specially formatted
+
+P2.57 Prompt Display at Iteration Start ► Dashboard UI (spec: logging-telemetry.md:170-181)
+  - Show the prompt sent to Claude at top of activity log
+  - Bordered box format with "Prompt" header
+  - Store prompt in iteration state or JSONL events
+  - Currently prompts not displayed
+
+New P3 Items (Jan 2026 - Iteration 13):
+P3.27 JSONL Session File Writing ──────► LoggingService (spec: logging-telemetry.md:59-77)
+  - Write events to `.ralph/sessions/{session-id}.jsonl`
+  - Raw Claude events passed through without modification
+  - One event per line (newline-delimited JSON)
+  - File naming matches container name
+  - Currently no JSONL file writing - events only broadcast via SSE
+
+New P4 Items (Jan 2026 - Iteration 13):
+P4.24 Hardcoded Model Version ─────────► ClaudeLive.ts:27,76
+  - `--model claude-opus-4-5-20251101` hardcoded
+  - Should be configurable via ConfigService
+  - Allow CLI flag `--model` or env var MODEL
+  - Future-proofs against model updates
+
+P4.25 Hardcoded 10-Minute Timeout ─────► program.ts:244
+  - `timeoutMs: 10 * 60 * 1000` hardcoded
+  - Conflicts with P1.57 (1-hour safety timeout)
+  - Should be configurable via CLI or config
+  - Already noted but not linked to source location
+
+P4.26 Hardcoded MIME Types ────────────► server.ts:176-185
+  - Static MIME_TYPES map limited to 8 extensions
+  - Missing common types: .woff, .woff2, .map, .txt, .md
+  - Consider using mime-types library
+  - Or expand static map for all dashboard assets
+
+P4.27 Hardcoded localhost in Console ──► server.ts:299
+  - `console.log(\`Dashboard at http://localhost:${port}\`)`
+  - Should use actual binding address
+  - Could be 0.0.0.0 or specific interface
+  - Misleading when binding to non-localhost
+
+New P5 Items (Jan 2026 - Iteration 13):
+P5.33 Test: parseNDJSONWithFallback ───► ndjson.ts:41-60 (no tests)
+  - Returns discriminated union of parsed JSON or raw text
+  - No dedicated tests for fallback behavior
+  - Add tests for valid JSON, invalid JSON, mixed content
+
+P5.34 Test: fromReadableStream ────────► ndjson.ts:68-79 (no tests)
+  - Converts WHATWG ReadableStream to Effect Stream
+  - No tests for stream conversion
+  - Add tests for normal flow, errors, cancellation
+
+P5.35 Test: collectAll ───────────────► ndjson.ts:86-89 (no tests)
+  - Collects stream into array
+  - Simple utility but untested
+  - Add basic collect test
+
+P5.36 Test: forEach ──────────────────► ndjson.ts:97-101 (no tests)
+  - Stream processing with side effects
+  - Untested side effect handling
+  - Add tests for callback invocation
+
+P5.37 Test: Array Index Assertions ───► container.test.ts:77-78
+  - Uses `result[0]!` and `result[1]!` without length checks
+  - Tests could fail with cryptic error if array shorter
+  - Add explicit length assertions before index access
+
+P5.38 Test: Service Layer Integration ► No tests use DockerTest/ClaudeTest/GitTest
+  - Test layers exist in src/layers/test/
+  - Only program.test.ts uses TestLive composition
+  - No individual service layer tests
+  - Add tests for each layer using test mocks
+
+New P6 Items (Jan 2026 - Iteration 13):
+P6.38 as any Workarounds in Layers ───► ClaudeLive.ts:135, GitLive.ts:138, DashboardLive.ts:188
+  - Documented workaround for Effect Context.Tag interface/class shadowing
+  - Comment explains issue but doesn't solve it
+  - Investigate proper Effect pattern for service implementation
+  - May require Effect version upgrade or pattern change
+
+P6.39 Type Inconsistency: GitError ────► services/Git.ts:3-7 vs errors/index.ts:38-42
+  - Interface GitError in services/Git.ts has different structure
+  - Class GitError in errors/index.ts uses Data.TaggedError
+  - Interface declares `_tag` and `message` as required
+  - Class has different property pattern
+  - Consolidate to single source of truth
+
+P6.40 Type Inconsistency: ClaudeError ► services/Claude.ts:4-8 vs errors/index.ts:25-29
+  - Same issue as P6.39 for ClaudeError
+  - Interface vs class mismatch
+  - Consolidate definitions
+
+P6.41 NDJSON Error Message Truncation ► ndjson.ts:28
+  - `line.slice(0, 100)` truncates error context
+  - Long JSON lines lose debugging info
+  - Consider logging full line to debug output
+  - Keep truncated in user-facing message
+
+Iteration 13 Dependency Graph Additions:
+P1.155 Generic JSON Parse ──────────► P4.6 JSONL Parse Tolerance
+P1.156 Request Body Validation ─────► P1.144 HTTP Body Validation (extends)
+P1.157 Non-Null SSE Cancel ─────────► P1.133 SSE Memory Leak
+P1.158 any vs unknown ──────────────► Code quality (standalone)
+P1.159 Unused Error Types ──────────► Error handling audit
+P1.160 catchAll Type Loss ──────────► P1.153 Structured Error Handling
+P1.161 Retry Logic ────────────────► P4.* Robustness category
+P1.162 Docker Inspect Partial ─────► DockerLive refactor
+P1.163 Git Dual Command Failure ───► P1.61 GitLive Dual-Path
+P1.164 Timeout Tag Check ──────────► P1.58 Timeout Error Detection
+P1.165 DashboardError Class ────────► P1.60 DashboardError TaggedError
+P2.56 Error Display ───────────────► P3.20 Session Recovery
+P2.57 Prompt Display ──────────────► P3.17 Iteration Prompt Display
+P3.27 JSONL Session Files ─────────► P3.22 LoggingService Interface
+P4.24 Model Version Config ────────► ConfigService extension
+P4.25 Timeout Config ──────────────► P1.57 1-Hour Safety Timeout
+P4.26 MIME Types ──────────────────► P2.8 Static File Serving
+P4.27 Console localhost ───────────► P1.149 Dashboard Binding Address
+P5.33-P5.36 Stream Utils Tests ────► P5.* Test coverage
+P5.37 Array Index Tests ───────────► Test quality
+P5.38 Service Layer Tests ─────────► P5.27-P5.32 Integration Tests
+P6.38 as any Workarounds ──────────► Effect architecture
+P6.39-P6.40 Type Inconsistency ────► Error type consolidation
+P6.41 Error Truncation ────────────► P4.6 JSONL Parse Tolerance
 ```
