@@ -496,6 +496,30 @@
   - These are exact filenames expected in `templates/` directory
   - Wire to mode selection in createSession
 
+### 1.64 GitService Container Context (NEW - Jan 2026 Research)
+- [ ] GitService operations must run inside container, not on host (refs: src/layers/GitLive.ts, src/program.ts:254)
+  - **Current issue**: GitLive.ts uses bare `git` commands that run on HOST git repository
+  - program.ts:254 calls `git.hasUnpushedCommits()` expecting container git state
+  - **Fix**: Git operations should use `DockerService.exec(containerName, "git ...")` pattern
+  - Affects: hasUnpushedCommits(), push(), fetch() when checking container state
+  - Alternative: Ensure caller passes correct context (host vs container operations)
+
+### 1.65 listContainersByPrefix for Docker Daemon (NEW - Jan 2026 Research)
+- [ ] Add new method for Docker container listing (refs: DockerLive.ts:292-318 vs ralph.ts:137)
+  - **CRITICAL**: Current `listByPrefix()` searches filesystem, not Docker daemon
+  - Blocks P1.9 startup cleanup - cannot find stale containers
+  - Add method: `listContainersByPrefix(prefix: string)` that runs:
+    `docker ps -a --filter name=${prefix} --format "{{.Names}}"`
+  - Keep existing `listByPrefix(containerName, prefix)` for filesystem operations
+  - This is the fix for P6.9 elevated to P1 priority
+
+### 1.66 .claude Directory Write Access (NEW - Jan 2026 Research)
+- [ ] Mount .claude directory read-write not read-only (refs: program.ts:39 vs ralph.ts:168)
+  - Current: `${process.env.HOME}/.claude:/home/node/.claude:ro` (read-only)
+  - Required: `${process.env.HOME}/.claude:/home/node/.claude:rw` (read-write)
+  - Claude Code needs write access for session state storage
+  - This is a security-functionality tradeoff, but necessary for operation
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -1335,21 +1359,33 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 2)
+### Priority Summary (Updated Jan 2026 - Iteration 3)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 60 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete) |
+| P1 | Critical Integration | 66 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete, 3 new items) |
 | P2 | Dashboard Integration | 16 items | Core UX features |
 | P3 | Missing Functionality | 15 items | Logging/telemetry subsystem + streaming |
 | P4 | Robustness | 10 items | Production readiness |
-| P5 | Test Coverage | 12 items | Quality assurance |
-| P6 | Dashboard & Streaming Integration | 27 items | NEW: Event streaming, state sync, lifecycle |
-| **Total** | | **140 items** | ~35-40% complete |
+| P5 | Test Coverage | 12 items | Quality assurance (P5.9 duplicate of P5.2) |
+| P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
+| **Total** | | **146 items** | ~35-40% complete |
 
-**Key Findings This Iteration**:
-- P6.9 is CRITICAL: DockerService.listByPrefix() searches filesystem not Docker daemon
+**Key Findings Iteration 3 (Jan 2026 Parallel Research)**:
+- **P6.9 CRITICAL**: DockerService.listByPrefix() searches filesystem not Docker daemon - elevated to P1.65
+- **NEW P1.64**: GitService runs on host, should use DockerService.exec() for container git operations
+- **NEW P1.65**: Add listContainersByPrefix() method for Docker daemon queries (fixes P6.9)
+- **NEW P1.66**: .claude volume mount must be :rw not :ro for session state storage
 - P1.23, P1.26, P1.28, P1.37 verified complete (git config, clone pattern, keep-alive)
-- 27 new gaps identified primarily in dashboard/streaming integration
+- P1.49 Command Injection CONFIRMED - prompt strings not escaped in ClaudeLive.ts:41,89
+- Logging subsystem (P3) is 0% implemented - complete gap, no LoggingService exists
+- Test coverage verified at ~25% (utilities tested, service layers 0%)
+
+**Duplicate Items to Consolidate**:
+- P1.19 + P1.61 → Single "Dual-path unpushed commit detection" item
+- P1.27 + P6.8 + P6.21 → Single "Firewall polling with 30s timeout" item
+- P1.57 + P6.20 → Single "1-hour Claude safety timeout" item
+- P5.2 + P5.9 → Single "createSession() tests" item
+- P6.1 + P3.1 → Single "Use runWithEvents() for event streaming" item
 
 ### Dependency Graph
 ```
@@ -1530,7 +1566,7 @@ P6.5 Stderr Streaming ────────► P6.1 Event Streaming
 P6.6 Buffer Management ───────► P6.3 NDJSON Error Handling
 P6.7 Exec User Flag ──────────► P1.21 Container User Switching
 P6.8 Logs Polling ────────────► P1.2 Firewall Ready Detection
-P6.9 Docker PS Fix ───────────► P1.9 Startup Cleanup (CRITICAL - blocks cleanup)
+P6.9 Docker PS Fix ───────────► P1.65 listContainersByPrefix (CRITICAL - now P1.65)
 P6.10 Branch Verification ────► P1.31 Host-Side Branch Verification
 P6.11 Clone Branch Selection ─► P1.18 Clone Branch Selection
 P6.12 Push -u Verification ───► P1.19 Unpushed Detection
@@ -1549,4 +1585,9 @@ P6.24 Volume Mount .gitconfig ─► P1.55 Volume Mount Paths
 P6.25 Path Mapping ───────────► P6.24 Volume Mount .gitconfig
 P6.26 Template File Read ─────► P1.15 Prompt Template Workflow
 P6.27 Three Iteration Limits ─► P1.8 maxIterations Enforcement
+
+New P1 Items (Jan 2026 - Iteration 3):
+P1.64 GitService Container ───► P1.1 Main Entry Point (context must be correct)
+P1.65 listContainersByPrefix ─► P1.9 Startup Cleanup (CRITICAL - was P6.9)
+P1.66 .claude Write Access ───► P1.55 Volume Mount Paths
 ```
