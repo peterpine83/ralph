@@ -668,6 +668,121 @@
   - Should use `nextArg !== undefined` check instead
   - Silent misparse of CLI arguments with empty values
 
+### 1.89 Stream Cancellation Resource Leak in ClaudeLive (NEW - Jan 2026 Iteration 7)
+- [ ] Ensure docker exec cleanup on stream interruption (refs: src/layers/ClaudeLive.ts:69-134)
+  - `runWithEvents()` creates scoped stream via docker.execStream()
+  - If consumer cancels before completion, docker exec process may continue running
+  - Verify Effect.scoped at DockerLive.ts:221 handles cleanup
+  - Potential zombie docker exec processes accumulating over time
+
+### 1.90 DashboardLive SSE Controller Type Safety (NEW - Jan 2026 Iteration 7)
+- [ ] Fix generic type parameter for ReadableStreamDefaultController (refs: src/layers/DashboardLive.ts:17, 120-154)
+  - `clientsRef` declared as `Set<ReadableStreamDefaultController>` missing type param
+  - Should be `ReadableStreamDefaultController<Uint8Array>` per line 30 usage
+  - TypeScript may not catch due to structural typing, runtime behavior undefined
+
+### 1.91 Race Condition in DashboardLive SSE Client Tracking (NEW - Jan 2026 Iteration 7)
+- [ ] Ensure atomic client registration in SSE (refs: src/layers/DashboardLive.ts:127-133, 142-152)
+  - Multiple clients connecting simultaneously could corrupt clientsRef Set
+  - `Effect.runSync(Ref.update(...))` from sync context may break atomicity
+  - Could result in lost client connections, missed broadcasts
+
+### 1.92 Feature Array Element Validation (NEW - Jan 2026 Iteration 7)
+- [ ] Validate feature elements have required properties (refs: src/container.ts:43-44)
+  - `parsed.features.filter((f: { passes: boolean }) => !f.passes)` assumes elements have passes
+  - If features.json contains `[null, {}, {"passes": true}]`, filter crashes on null
+  - Extends P1.79 - element validation in addition to array existence
+
+### 1.93 Git Root Detection Staleness (NEW - Jan 2026 Iteration 7)
+- [ ] Detect stale git root when config cached long-term (refs: src/layers/ConfigLive.ts:14-25)
+  - `git rev-parse --show-toplevel` runs once at ConfigLive creation
+  - Result cached for entire session, may become stale
+  - User changing directory/git state between config creation and container ops
+
+### 1.94 Effect.sleep Duration Type Safety (NEW - Jan 2026 Iteration 7)
+- [ ] Use Duration.seconds() instead of string literals (refs: src/program.ts:75)
+  - `Effect.sleep("3 seconds")` uses string format with no compile-time validation
+  - Invalid formats like "3sec" fail at runtime
+  - Use `Duration.seconds(3)` for type safety
+
+### 1.95 Templates Directory Existence Validation (NEW - Jan 2026 Iteration 7)
+- [ ] Validate templates/ directory exists before volume mount (refs: src/program.ts:39)
+  - `${process.cwd()}/templates:/workspace/templates:ro` mount
+  - No check that templates directory exists
+  - Cryptic Docker mount error if directory missing
+
+### 1.96 Iteration State Invariants (NEW - Jan 2026 Iteration 7)
+- [ ] Validate iteration state machine transitions (refs: src/program.ts:289-321)
+  - No validation that iteration always increments by exactly 1
+  - No validation that noChangeCount doesn't go negative
+  - Could create infinite loop if state transitions break
+
+### 1.97 Double Error Wrapping in DockerLive (NEW - Jan 2026 Iteration 7)
+- [ ] Preserve original error information in wrapping (refs: src/layers/DockerLive.ts:87-93)
+  - Command errors wrapped in DockerError, but Command may already throw tagged errors
+  - Pattern repeated 10+ times, creates nested error objects
+  - Original stack trace buried in `cause`, harder to debug
+
+### 1.98 Git History Linearity Assumption (NEW - Jan 2026 Iteration 7)
+- [ ] Handle non-linear git histories in unpushed detection (refs: src/layers/GitLive.ts:77-110)
+  - `git log origin/branch..HEAD` assumes linear history
+  - Merge/rebase workflows may have different commit topology
+  - False positives after rebases or complex merges
+
+### 1.99 Dual Dashboard State Risk (NEW - Jan 2026 Iteration 7)
+- [ ] Prevent concurrent use of server.ts and DashboardLive (refs: src/server.ts:9-21, src/layers/DashboardLive.ts:9-21)
+  - Both files have overlapping functionality with separate state
+  - If both imported, two state objects exist, updates don't sync
+  - Migrate before risk materializes (related to P2.1)
+
+### 1.100 NDJSON Buffer Pop Pattern (NEW - Jan 2026 Iteration 7)
+- [ ] Implement inter-chunk buffer management with lines.pop() (refs: ralph.ts:275-277)
+  - Pattern: `buffer = lines.pop() || ""` keeps incomplete line for next chunk
+  - Current ndjson.ts may not handle split JSON objects across stream chunks
+  - Critical for multi-byte characters split at chunk boundaries
+
+### 1.101 Dual-Mode Claude Spawn Pattern (NEW - Jan 2026 Iteration 7)
+- [ ] Implement different spawn patterns based on dashboard state (refs: ralph.ts:254-335)
+  - Dashboard mode: `stdout: "pipe"` + NDJSON parsing + `--output-format stream-json`
+  - Non-dashboard: `stdout: "inherit"` + NO stream-json flag
+  - ClaudeLive.ts always uses stream-json (line 87) - needs conditional logic
+
+### 1.102 Pause Polling Dual Exit Conditions (NEW - Jan 2026 Iteration 7)
+- [ ] Implement pause loop with stopping check (refs: ralph.ts:442-449)
+  - Pattern: `while (isPaused() && !isStopping())` - checks TWO conditions
+  - After loop: `if (isStopping()) break` - stopping takes priority over resume
+  - Prevents deadlock where stop requested during pause
+
+### 1.103 Parallel Stream Processing with proc.exited Race (NEW - Jan 2026 Iteration 7)
+- [ ] Await stdout, stderr, AND process exit together (refs: ralph.ts:319-323)
+  - Pattern: `Promise.all([streamNDJSON(stdout), streamStderr(stderr), proc.exited])`
+  - Ensures orchestrator waits for stream draining AND process exit
+  - Prevents premature iteration advancement
+
+### 1.104 JSON Parse Fallback to Raw Output (NEW - Jan 2026 Iteration 7)
+- [ ] Route failed JSON parses to different channel (refs: ralph.ts:283-289)
+  - On parse failure: emit via `sendOutput(line)` not skip
+  - Parse failures routed to raw text channel, not discarded
+  - Different from P4.11 which says "skip" - actually routes differently
+
+### 1.105 Heredoc Inline in Docker Exec (NEW - Jan 2026 Iteration 7)
+- [ ] Document triple-nesting pattern for file writes (refs: ralph.ts:221-223)
+  - Pattern: Bun template → bash -c → heredoc
+  - Avoids file escaping issues by using heredoc delimiters inside exec
+  - Different from DockerService.writeFile() approach
+
+### 1.106 Plan Mode Empty Features Array (NEW - Jan 2026 Iteration 7)
+- [ ] Initialize features with empty array for plan mode (refs: ralph.ts:371-379)
+  - Plan mode: `featuresData = { features: [] }` is expected, not error
+  - Only validate/read features.json in build mode
+  - Different from P1.48 which treats empty as error
+
+### 1.107 Dashboard Server Before Container Creation (NEW - Jan 2026 Iteration 7)
+- [ ] Start dashboard server before creating container (refs: ralph.ts:412-423)
+  - Server starts BEFORE container creation
+  - Dashboard lifecycle independent of container lifecycle
+  - Initialization sequence: server start → set callbacks → update state
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -806,6 +921,31 @@
   - Track tool_use start, update timer, stop when tool_result arrives
   - Part of subagent tracking feature
 
+### 2.21 Iteration Display Format (NEW - Jan 2026 Iteration 7)
+- [ ] Implement consistent iteration progress output (refs: ralph.ts:454-496)
+  - Format: "=== Iteration X/Y ===" banner
+  - Separate line: "N features remaining" (build mode)
+  - Plan mode shows: "Running planning analysis..." instead
+  - User-facing output format for progress tracking
+
+### 2.22 Final Verification Console Messages (NEW - Jan 2026 Iteration 7)
+- [ ] Display two-stage completion messages (refs: ralph.ts:484-494)
+  - First pass: "All features complete! Running final verification iteration..."
+  - Second pass: "All features complete and verified!"
+  - Explicit messaging that one more iteration happens even when features complete
+
+### 2.23 Exit Message with gh Command (NEW - Jan 2026 Iteration 7)
+- [ ] Print PR view command on exit (refs: ralph.ts:637)
+  - Format: "\\nTo view PR: gh pr view {branch}"
+  - Provides ready-to-run command for next step
+  - Always shown regardless of PR existence
+
+### 2.24 SubagentTracker Interface (NEW - Jan 2026 Iteration 7)
+- [ ] Define SubagentTracker for Task tool visibility (refs: specs/logging-telemetry.md:210-217)
+  - Interface not defined in codebase
+  - Correlate tool_use ID with tool_result
+  - Track start time, elapsed time, completion status
+
 ---
 
 ## Priority 3: Missing Functionality
@@ -924,6 +1064,26 @@
   - Display status indicator in iteration card UI
   - Extends P3.10 with specific status tracking
 
+### 3.19 POST /rerun Endpoint Implementation (NEW - Jan 2026 Iteration 7)
+- [ ] Implement iteration re-run with modified prompt (refs: specs/logging-telemetry.md:232-254)
+  - Edit prompt in textarea
+  - POST /rerun endpoint with modified prompt
+  - Re-run as iteration N+1 on same branch
+  - How iteration N+1 differs from N in state management
+
+### 3.20 Session Recovery on Browser Reconnect (NEW - Jan 2026 Iteration 7)
+- [ ] Implement browser-side recovery flow (refs: specs/logging-telemetry.md:260-284)
+  - `/iterations` endpoint returns list with metrics
+  - `/logs/:iteration` streams JSONL for specific iteration
+  - Browser loads iteration sidebar from JSONL on reconnect
+  - State machine for reconnection handling
+
+### 3.21 Error Display in Activity Log (NEW - Jan 2026 Iteration 7)
+- [ ] Display errors inline in activity log (refs: specs/logging-telemetry.md:286-298)
+  - Errors as special events in activity log
+  - Iteration card shows ✗ status
+  - Define error event type and dashboard rendering
+
 ---
 
 ## Priority 4: Robustness Improvements
@@ -1011,6 +1171,36 @@
   - When both are available, credential helper (HTTPS) takes precedence
   - SSH is fallback when GITHUB_TOKEN unavailable
   - Document this decision in code comments and user docs
+
+### 4.14 NDJSON Error Message Truncation Indicator (NEW - Jan 2026 Iteration 7)
+- [ ] Add truncation indicator to NDJSON error messages (refs: src/streams/ndjson.ts:28)
+  - Current: `line.slice(0, 100)` without indicator if truncated
+  - Should include `${line.length > 100 ? '...' : ''}` suffix
+  - Prevents confusion about whether full line is shown
+
+### 4.15 Container Partial Initialization Failure Recovery (NEW - Jan 2026 Iteration 7)
+- [ ] Handle partial initialization failures gracefully (refs: specs/container.md:75-85)
+  - What if firewall init succeeds but git clone fails?
+  - Which state should container be in for cleanup to work?
+  - Log which stage failed for debugging
+
+### 4.16 Network Timeout Recovery (NEW - Jan 2026 Iteration 7)
+- [ ] Add recovery logic for network timeouts during startup (refs: specs/networking.md:44-99)
+  - What if GitHub IP range API is down?
+  - What if DNS resolution fails?
+  - Retry logic, fallback IP ranges, graceful degradation
+
+### 4.17 Features.json Concurrent Modification (NEW - Jan 2026 Iteration 7)
+- [ ] Handle concurrent features.json modification (refs: specs/orchestrator.md:30-31)
+  - What if Claude and orchestrator write simultaneously?
+  - File locking mechanism or conflict detection
+  - Validation that format hasn't changed mid-iteration
+
+### 4.18 Circular Dependency Detection in Services (NEW - Jan 2026 Iteration 7)
+- [ ] Validate service dependency graph is acyclic (refs: src/layers/*.ts)
+  - ClaudeLive and GitLive both depend on DockerService
+  - No explicit validation prevents circular dependencies
+  - Effect should detect at runtime, but validation at build time better
 
 ---
 
@@ -1117,6 +1307,30 @@
   - Test with missing .ssh directory
   - Test with missing .claude directory
   - Verify correct error messages
+
+### 5.15 SSE Client Race Condition Tests (NEW - Jan 2026 Iteration 7)
+- [ ] Test concurrent SSE client registration (refs: P1.91)
+  - Simulate multiple clients connecting simultaneously
+  - Verify all clients receive broadcasts
+  - Test for Set corruption during concurrent access
+
+### 5.16 Stream Cancellation Resource Leak Tests (NEW - Jan 2026 Iteration 7)
+- [ ] Test resource cleanup on stream interruption (refs: P1.89)
+  - Verify docker exec process terminates when stream cancelled
+  - Check for zombie processes after interrupted operations
+  - Test Effect.scoped cleanup behavior
+
+### 5.17 Feature Element Validation Tests (NEW - Jan 2026 Iteration 7)
+- [ ] Test malformed feature array elements (refs: P1.92)
+  - Test `features: [null]` - should error gracefully
+  - Test `features: [{}]` - missing passes property
+  - Test `features: [{"other": true}]` - wrong property
+
+### 5.18 Iteration State Invariant Tests (NEW - Jan 2026 Iteration 7)
+- [ ] Test iteration state machine correctness (refs: P1.96)
+  - Verify iteration always increments by exactly 1
+  - Verify noChangeCount never goes negative
+  - Test boundary conditions near maxIterations
 
 ---
 
@@ -1616,16 +1830,44 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 6)
+### Priority Summary (Updated Jan 2026 - Iteration 7)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 88 items | Blocking basic functionality (includes 3 CRITICAL security: P1.49, P1.81, P1.82; 3 verified complete; 11 new items from iteration 6) |
-| P2 | Dashboard Integration | 20 items | Core UX features (4 new: syntax highlighting, collapsible, tables, task timing) |
-| P3 | Missing Functionality | 18 items | Logging/telemetry subsystem + streaming (3 new: session analysis, prompt display, status field) |
-| P4 | Robustness | 13 items | Production readiness (3 new: NDJSON tolerance, content normalization, auth docs) |
-| P5 | Test Coverage | 14 items | Quality assurance (2 new: IP aggregation, SSH non-interactive) |
+| P1 | Critical Integration | 107 items | Blocking basic functionality (includes 3 CRITICAL security: P1.49, P1.81, P1.82; 3 verified complete; 19 new items from iteration 7) |
+| P2 | Dashboard Integration | 24 items | Core UX features (4 new: iteration display, final verification messages, exit message, subagent tracker) |
+| P3 | Missing Functionality | 21 items | Logging/telemetry subsystem + streaming (3 new: rerun endpoint, session recovery, error display) |
+| P4 | Robustness | 18 items | Production readiness (5 new: truncation indicator, partial init, network timeout, concurrent modification, circular deps) |
+| P5 | Test Coverage | 18 items | Quality assurance (4 new: SSE race, stream cancellation, feature validation, state invariants) |
 | P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
-| **Total** | | **180 items** | ~35% complete |
+| **Total** | | **215 items** | ~35% complete |
+
+**Key Findings Iteration 7 (Jan 2026 - Parallel 3-Agent Research)**:
+- **NEW P1.89-P1.107**: 19 new P1 items from comprehensive gap analysis
+  - P1.89: Stream cancellation resource leak in ClaudeLive
+  - P1.90: DashboardLive SSE controller type safety
+  - P1.91: Race condition in SSE client tracking
+  - P1.92: Feature array element validation
+  - P1.93: Git root detection staleness
+  - P1.94: Effect.sleep duration type safety
+  - P1.95: Templates directory existence validation
+  - P1.96: Iteration state invariants
+  - P1.97: Double error wrapping in DockerLive
+  - P1.98: Git history linearity assumption
+  - P1.99: Dual dashboard state risk
+  - P1.100: NDJSON buffer pop pattern for chunk boundaries
+  - P1.101: Dual-mode Claude spawn pattern
+  - P1.102: Pause polling dual exit conditions
+  - P1.103: Parallel stream processing with proc.exited race
+  - P1.104: JSON parse fallback to raw output (not skip)
+  - P1.105: Heredoc inline in docker exec pattern
+  - P1.106: Plan mode empty features array handling
+  - P1.107: Dashboard server before container creation
+- **NEW P2.21-P2.24**: Dashboard UX (iteration display, final verification, exit message, subagent tracker)
+- **NEW P3.19-P3.21**: Logging (rerun endpoint, session recovery, error display)
+- **NEW P4.14-P4.18**: Robustness (truncation indicator, partial init, network timeout, concurrent mod, circular deps)
+- **NEW P5.15-P5.18**: Test coverage (SSE race, stream cancellation, feature validation, state invariants)
+- **Analysis Coverage**: 36 gaps from spec research, 15 new issues from code analysis, 23 patterns from ralph.ts comparison
+- **Major Finding**: Logging subsystem (P3) remains 0% implemented despite 21 items identified
 
 **Key Findings Iteration 6 (Jan 2026 - Parallel 3-Agent Research)**:
 - **NEW P1.78**: TextDecoder stream mode in DockerLive.execStream (data corruption risk)
