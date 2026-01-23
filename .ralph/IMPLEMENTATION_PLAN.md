@@ -319,6 +319,61 @@
   - Update signature to include args or individual flags
   - Wire to loop condition at lines 295-297
 
+### 1.41 Volume Mount Completeness Verification
+- [ ] Verify all required volume mounts are present (refs: specs/container.md:36-40)
+  - `~/.ssh:/root/.ssh:ro` - SSH keys for git operations
+  - `~/.claude:/home/node/.claude:ro` - Claude CLI configuration
+  - `templates:/workspace/templates:ro` - Template files
+  - `.gitconfig` mounted read-only for git configuration
+  - Check program.ts:36-40 has all mounts
+
+### 1.42 GIT_COMMITTER_* Environment Variables
+- [ ] Add GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL (refs: specs/container.md, P1.25)
+  - Git uses separate committer identity from author
+  - Pass `GIT_COMMITTER_NAME=${process.env.GIT_COMMITTER_NAME || 'Ralph'}`
+  - Pass `GIT_COMMITTER_EMAIL=${process.env.GIT_COMMITTER_EMAIL || 'ralph@localhost'}`
+  - Completes P1.25 (git author defaults)
+
+### 1.43 Validate Git Repository on Host Before Container
+- [ ] Check git repository before container creation (refs: specs/orchestrator.md:15)
+  - Run `git rev-parse --git-dir` on HOST before container creation
+  - Fail fast with "ERROR: Not a git repository" if fails
+  - Belongs with P1.6 environment validation
+  - Prevents expensive container setup for invalid directory
+
+### 1.44 Verify CAP_NET_ADMIN Is Only Capability
+- [ ] Ensure container only has CAP_NET_ADMIN (refs: specs/container.md:228-231)
+  - Security requirement: Only grant minimum necessary capability
+  - Add `--cap-drop=ALL` to container creation
+  - Then add `--cap-add=NET_ADMIN` explicitly
+  - Verify no other capabilities in docker create command
+
+### 1.45 UserKnownHostsFile SSH Configuration
+- [ ] Add UserKnownHostsFile to SSH command (refs: specs/container.md:213)
+  - Extends P1.23: `core.sshCommand "ssh -i /tmp/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"`
+  - Prevents SSH prompts about known_hosts updates
+  - Required for non-interactive git operations
+
+### 1.46 Exit Code Structural Validation (ZFC)
+- [ ] Use exit codes for verify_command validation (refs: specs/zfc-architecture.md:94-98, 142-143)
+  - verify_command exit 0 = success, non-0 = failure
+  - Do NOT parse command output text for success/failure
+  - This is architectural principle, affects runIteration logic
+  - Orchestrator should only check exit code, not stderr content
+
+### 1.47 Features.json Schema Validation
+- [ ] Validate required fields in features.json (refs: specs/features.md:6-19, extends P1.39)
+  - Required fields per feature: `id`, `description`, `passes`
+  - Optional fields: `verify_command`, `dependencies`
+  - Reject invalid schema before container creation
+  - Use JSON schema or manual validation
+
+### 1.48 Empty Features Array Handling
+- [ ] Handle empty features array gracefully (refs: specs/features.md:249)
+  - If features array is empty, exit with message "No features to implement"
+  - Don't create container for empty work
+  - Different from missing file (that's an error)
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -365,6 +420,32 @@
   - Reports `remaining: 0` since plan mode has no features to track
   - Pattern: `updateIteration(iteration, 1, 0)` for plan mode
 
+### 2.7 Dashboard Port Availability Check
+- [ ] Verify port is available before starting server (refs: specs/orchestrator.md:181)
+  - Default port 3847, configurable via --dashboard-port
+  - Check port availability before Bun.serve()
+  - Fail with clear error: "Port {port} is already in use"
+  - Suggest alternative or use --dashboard-port flag
+
+### 2.8 Static File Serving Path Verification
+- [ ] Verify dashboard/dist/ exists before serving (refs: specs/dashboard.md:207-209)
+  - Check if `dashboard/dist/` directory exists
+  - If missing, show helpful error about building dashboard
+  - Or skip static file serving with warning
+
+### 2.9 ZFC Compliance Audit of Existing Code
+- [ ] Audit code for ZFC violations (refs: specs/zfc-architecture.md:261-280)
+  - Scan for keywords: "includes", "match", "detect", "analyze", "quality"
+  - Verify all decisions use structured data (features.json, exit codes)
+  - No heuristic classification based on text content
+  - Document any borderline cases
+
+### 2.10 SSH Key Existence Warning
+- [ ] Warn if ~/.ssh directory missing on host (refs: specs/container.md:202-207)
+  - Check if `~/.ssh` exists before container creation
+  - If missing, warn: "WARNING: ~/.ssh not found - git operations may fail"
+  - Continue (not fatal) as SSH might not be needed
+
 ---
 
 ## Priority 3: Missing Functionality
@@ -404,6 +485,30 @@
   - `GET /logs/:iteration` - Returns raw JSONL for specific iteration
   - `POST /rerun` - Re-run iteration with modified prompt
 
+### 3.6 Session ID Matches Container Name
+- [ ] Enforce session-id == container-name for logging (refs: specs/logging-telemetry.md:64)
+  - Session log file: `{session-id}.jsonl` where session-id matches container name
+  - Ensures log files are discoverable by container name
+  - Add assertion/validation in LoggingService
+
+### 3.7 iteration_start Event Schema
+- [ ] Implement iteration_start event type (refs: specs/logging-telemetry.md:72-77)
+  - Schema: `{"type":"iteration_start","iteration":3,"timestamp":"2025-01-15T14:30:52Z"}`
+  - Emit at beginning of each iteration
+  - Required for iteration boundary detection in logs
+
+### 3.8 Context Window Percentage Calculation
+- [ ] Hardcode 200k context window for metrics (refs: specs/logging-telemetry.md:99, 362-363)
+  - Formula: `contextPercent = (totalTokens / 200000) * 100`
+  - Hardcode 200k for now (Opus 4 context window)
+  - Document for future model changes
+
+### 3.9 Claude CLI Flag Verification
+- [ ] Verify all required Claude CLI flags present (refs: specs/claude-integration.md:18-24)
+  - Required: `-p`, `--dangerously-skip-permissions`, `--verbose`, `--output-format stream-json`
+  - Verify ClaudeLive.ts includes all flags
+  - Missing flag would break functionality silently
+
 ---
 
 ## Priority 4: Robustness Improvements
@@ -426,6 +531,26 @@
   - Git operations: remote connectivity, lock conflicts
   - Use Effect.retry with Schedule.exponential
   - Cap retries at 3 attempts with jitter
+
+### 4.4 Retry Schedule Configuration
+- [ ] Document and configure retry timing (refs: extends P4.3)
+  - Initial delay: 100ms
+  - Max delay: 5000ms
+  - Jitter factor: 0.2
+  - Max attempts: 3
+  - Exponential base: 2
+
+### 4.5 Docker Daemon Availability Check
+- [ ] Verify docker daemon before operations (refs: specs/container.md:34-42)
+  - Run `docker version` at startup
+  - Fail fast with "ERROR: Docker daemon not running" if fails
+  - Prevents confusing errors during container creation
+
+### 4.6 JSONL Parse Error Tolerance
+- [ ] Ensure JSON parse errors are non-fatal (refs: discoveries:603-607)
+  - Wrap all features.json parsing in try-catch
+  - Log error but continue orchestration
+  - Consistent pattern across dashboard and orchestrator
 
 ---
 
@@ -466,6 +591,35 @@
   - `collectAll()` - stream-to-array collection
   - `forEach()` - side-effect iteration
   - Currently only `parseNDJSON()` has comprehensive tests
+
+### 5.6 ZFC Compliance Tests
+- [ ] Add tests enforcing ZFC patterns (refs: specs/zfc-architecture.md:261-280)
+  - Test that verify_command uses only exit codes
+  - Test no keyword matching on Claude output
+  - Test all decisions use structured data
+  - Architectural enforcement through tests
+
+### 5.7 Firewall Ready Detection Tests
+- [ ] Add tests for firewall detection (refs: P1.2, P1.27)
+  - Mock log streaming
+  - Verify detection of "Ralph Firewall Ready" message
+  - Test timeout after 30 seconds
+  - Test polling interval behavior
+
+### 5.8 Signal Handling Tests
+- [ ] Add tests for graceful shutdown (refs: P1.5)
+  - Test cleanup runs even on error
+  - Test container removal on shutdown
+  - Test double-signal force exit
+  - May require mock signal handlers
+
+### 5.9 createSession() Function Tests
+- [ ] Add tests for createSession() (refs: src/program.ts:23-200)
+  - 177 lines of critical path code
+  - Test container creation sequence
+  - Test git clone and branch setup
+  - Test firewall ready waiting
+  - Currently 0% coverage
 
 ---
 
@@ -611,6 +765,34 @@ Per research, different operations have different timeouts:
 - Checks for `'"url"'` substring in output (string match, not JSON parse)
 - Simple pattern avoids JSON parsing complexity for boolean check
 
+### Test Coverage Summary (from gap analysis)
+- **Tested Source Files**: 5 (args.ts, container.ts, program.ts partial, ndjson.ts partial, errors/index.ts)
+- **Untested Source Files**: 14 (main.ts, server.ts, all layers, all services interfaces)
+- **Total test lines**: 1,264 across 5 test files
+- **Skipped Tests**: 0
+- **TODOs in Source**: 1 (`program.ts:74`)
+
+### Service Layer Coverage
+- 0% coverage on live layer implementations (~931 lines total):
+  - DockerLive.ts: 325 lines - NOT tested
+  - ClaudeLive.ts: 138 lines - NOT tested
+  - GitLive.ts: 141 lines - NOT tested
+  - ConfigLive.ts: 68 lines - NOT tested
+  - DashboardLive.ts: 217 lines - NOT tested
+- createSession(): 177 lines - NOT tested (critical path)
+- server.ts: 301 lines - NOT tested (dashboard endpoints)
+
+### Implementation Completeness Estimate
+Based on comprehensive gap analysis comparing ralph.ts (641 lines, working) vs Effect implementation:
+- **Effect implementation is ~40-50% complete**
+- Service architecture scaffolded: YES
+- Core orchestration logic: PARTIAL (mainLoop, runIteration work)
+- Lifecycle management: MISSING (signals, cleanup, health checks)
+- Dashboard integration: MISSING (state sync, event streaming)
+- Step mode: MISSING
+- Final verification: MISSING
+- Plan mode completion: MISSING
+
 ---
 
 ## Blockers
@@ -671,11 +853,11 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 40 items | Blocking basic functionality |
-| P2 | Dashboard Integration | 6 items | Core UX features |
-| P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
-| P4 | Robustness | 3 items | Production readiness |
-| P5 | Test Coverage | 5 items | Quality assurance |
+| P1 | Critical Integration | 48 items | Blocking basic functionality |
+| P2 | Dashboard Integration | 10 items | Core UX features |
+| P3 | Missing Functionality | 9 items | Logging/telemetry subsystem |
+| P4 | Robustness | 6 items | Production readiness |
+| P5 | Test Coverage | 9 items | Quality assurance |
 
 ### Dependency Graph
 ```
@@ -755,11 +937,51 @@ P2.* Dashboard ────────────► Requires P1.1 complete fi
      │
      ├─► P2.5 Interactive CLI Prompts (can test without dashboard)
      │
-     └─► P2.6 Plan Mode Iteration Reporting
+     ├─► P2.6 Plan Mode Iteration Reporting
+     │
+     ├─► P2.7 Dashboard Port Availability
+     │
+     ├─► P2.8 Static File Path Verification
+     │
+     ├─► P2.9 ZFC Compliance Audit
+     │
+     └─► P2.10 SSH Key Warning
 
 P3.* Logging ──────────────► Can proceed in parallel with P2
+     │
+     ├─► P3.6 Session ID = Container Name
+     │
+     ├─► P3.7 iteration_start Event
+     │
+     ├─► P3.8 Context Window Percentage
+     │
+     └─► P3.9 Claude CLI Flag Verification
 
 P4.* Robustness ───────────► After P1-P3 complete
+     │
+     ├─► P4.4 Retry Schedule Config
+     │
+     ├─► P4.5 Docker Daemon Check
+     │
+     └─► P4.6 JSONL Parse Tolerance
 
 P5.* Testing ──────────────► After each priority phase
+     │
+     ├─► P5.6 ZFC Compliance Tests
+     │
+     ├─► P5.7 Firewall Detection Tests
+     │
+     ├─► P5.8 Signal Handling Tests
+     │
+     └─► P5.9 createSession Tests
+
+New P1 Dependencies:
+P1.41 Volume Mounts ────────► P1.1 Main Entry Point
+P1.42 GIT_COMMITTER_* ──────► P1.25 Git Author Defaults
+P1.43 Git Repo Validation ──► P1.6 Environment Validation
+P1.44 CAP_NET_ADMIN Only ───► P1.29 Container Create Pattern
+P1.45 UserKnownHostsFile ───► P1.23 Git Configuration
+P1.46 Exit Code Validation ─► ZFC Compliance (architectural)
+P1.47 Schema Validation ────► P1.39 Features.json Validation
+P1.48 Empty Features ───────► P1.39 Features.json Validation
 ```
