@@ -590,6 +590,84 @@
   - Without exit code check, container might fail to restart but orchestrator continues
   - Extends P1.10 Container Health Checks with explicit verification
 
+### 1.78 TextDecoder Stream Mode in DockerLive.execStream (NEW - Jan 2026 Iteration 6)
+- [ ] Use `decoder.decode(chunk, { stream: true })` in DockerLive.ts:232-233
+  - **CRITICAL**: Without `{ stream: true }`, multi-byte UTF-8 characters split across chunks corrupt
+  - Affects emoji, CJK characters, international text in Claude output
+  - Pattern: `decoder.decode(chunk)` → `decoder.decode(chunk, { stream: true })`
+  - Silent data corruption risk in streamed output
+
+### 1.79 parsed.features Property Validation (NEW - Jan 2026 Iteration 6)
+- [ ] Validate `parsed.features` exists and is array in container.ts:42-43
+  - **CRITICAL**: JSON.parse succeeds but accessing `.features` throws TypeError if missing
+  - Examples that would crash: `{}`, `{"features": null}`, `{"feature": []}`
+  - Currently throws unhandled TypeError instead of Effect error
+  - Return Effect.fail(FeatureError) with descriptive message
+
+### 1.80 Docker Exec Exit Code Capture (NEW - Jan 2026 Iteration 6)
+- [ ] Capture and verify exit codes from docker exec in DockerLive.ts:206-218
+  - **CRITICAL**: Command.string returns stdout even on non-zero exit codes
+  - `docker exec container git push` may fail but returns empty string with exit code 1
+  - Current: Returns empty string, caller assumes success
+  - Need: Verify exit code or use Command.exitCode pattern
+
+### 1.81 Git Command Injection Prevention (NEW - Jan 2026 Iteration 6)
+- [ ] Escape special characters in git commands in GitLive.ts (SECURITY)
+  - **CRITICAL**: Branch names, user names, emails interpolated without escaping
+  - Line 35: `git checkout ${branch}` - branch name not escaped
+  - Line 113: `git checkout -b ${branch}` - branch name not escaped
+  - Line 131: `git config user.name "${name}"` - name not escaped
+  - Line 135: `git config user.email "${email}"` - email not escaped
+  - Attack: branch `main"; rm -rf /workspace; echo "` executes arbitrary commands
+  - Distinct from P1.49 (prompt injection from external input) - this is internal command construction
+
+### 1.82 Find Command Injection in listByPrefix (NEW - Jan 2026 Iteration 6)
+- [ ] Escape prefix in find command in DockerLive.ts:296 (SECURITY)
+  - Pattern: `find /workspace -maxdepth 1 -name '${prefix}*'`
+  - If prefix contains single quotes or shell metacharacters, command injection possible
+  - Attack: prefix `*' -exec rm -rf {} \; -o -name '` executes destructive commands
+  - Use array-based command or proper shell escaping
+
+### 1.83 Error-Tolerant Command Execution Pattern (NEW - Jan 2026 Iteration 6)
+- [ ] Add failSafe option for error-tolerant commands (refs: ralph.ts:140,148,487,558)
+  - Bun uses `.quiet().nothrow()` modifiers for error-tolerant execution
+  - Effect implementation needs equivalent for cleanup ops, PR ready, etc.
+  - Pattern: Optional `failSafe: boolean` param that maps failures to Success with exit code
+  - Required for: P1.9 (cleanup), P1.20 (PR ready), P1.22 (circuit breaker)
+
+### 1.84 AbortSignal Integration for Claude Cancellation (NEW - Jan 2026 Iteration 6)
+- [ ] Accept AbortSignal in ClaudeService.run() options (refs: ralph.ts:245-251)
+  - ralph.ts uses `AbortSignal.any([timeoutController.signal, externalSignal])`
+  - Combines timeout with dashboard stop button abort
+  - Effect implementation needs similar pattern for interruption
+  - Required for: P1.16 (AbortController pattern), dual abort sources
+
+### 1.85 Stdin Stream Reader for CLI Prompts (NEW - Jan 2026 Iteration 6)
+- [ ] Create stdin reader utility with proper lock management (refs: ralph.ts:109-131)
+  - Bun.stdin.stream() provides WHATWG ReadableStream for interactive input
+  - **CRITICAL**: Reader lock MUST be released in finally block
+  - Pattern: `reader.releaseLock()` in finally to prevent hung subsequent reads
+  - Required for: P2.5 (Interactive CLI Prompts), P1.30 (dual input race)
+
+### 1.86 SSH-Only Git Operations Fallback (NEW - Jan 2026 Iteration 6)
+- [ ] Ensure git works when only SSH keys available, no GITHUB_TOKEN (refs: specs/networking.md:44-99)
+  - Credential helper requires token, but SSH auth is alternate path
+  - When GITHUB_TOKEN missing: skip credential helper config, rely on SSH
+  - Test scenario: user has SSH keys but no token environment variable
+
+### 1.87 tool_result Content Type Validation (NEW - Jan 2026 Iteration 6)
+- [ ] Handle tool_result.content as string or array (refs: specs/claude-integration.md:70-73)
+  - Claude API may return `content: string` or `content: ContentBlock[]`
+  - Current code assumes string, crashes on array variant
+  - Normalize to string for consistent handling
+
+### 1.88 Empty String CLI Argument Handling (NEW - Jan 2026 Iteration 6)
+- [ ] Handle empty string arguments correctly in args.ts:29-47
+  - `--branch ""` treated as missing argument (empty string is falsy)
+  - `if (arg === "--branch" && nextArg)` skips empty strings
+  - Should use `nextArg !== undefined` check instead
+  - Silent misparse of CLI arguments with empty values
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -705,6 +783,29 @@
   - All output to console only
   - Current code may fail if dashboard methods called without server
 
+### 2.17 Code Syntax Highlighting in Tool Calls (NEW - Jan 2026 Iteration 6)
+- [ ] Auto-detect file language and apply syntax highlighting (refs: specs/logging-telemetry.md:127-135)
+  - Dashboard should render tool_use content with language-based highlighting
+  - Auto-detect TypeScript, JSON, shell, Python, etc. from file extension
+  - Improves readability of code-heavy tool outputs
+
+### 2.18 Collapsible Tool Call Expansion (NEW - Jan 2026 Iteration 6)
+- [ ] Implement expand/collapse UI for tool calls (refs: specs/logging-telemetry.md:152-158)
+  - Each tool call shows one-line summary by default
+  - Example: "Read src/foo.ts:1-50" expands to show file content
+  - Reduces visual clutter while preserving detail access
+
+### 2.19 Table Rendering for Tool Outputs (NEW - Jan 2026 Iteration 6)
+- [ ] Detect and render table-like data structures (refs: specs/logging-telemetry.md:139-149)
+  - When tool output is table-like JSON, render as formatted table
+  - Better than raw JSON for structured data visualization
+
+### 2.20 Task Tool Timing Visualizer (NEW - Jan 2026 Iteration 6)
+- [ ] Display elapsed time counter for Task tool invocations (refs: specs/logging-telemetry.md:183-227)
+  - Show "⏳ Task: prompt (elapsed Xs)" with running timer
+  - Track tool_use start, update timer, stop when tool_result arrives
+  - Part of subagent tracking feature
+
 ---
 
 ## Priority 3: Missing Functionality
@@ -807,6 +908,22 @@
   - No dashboard: `stdout: "inherit", stderr: "inherit"` for simpler output
   - Omit streaming flags when not needed
 
+### 3.16 Claude Session JSONL Analysis Documentation (NEW - Jan 2026 Iteration 6)
+- [ ] Document that users can examine `.claude/sessions/*.jsonl` for subagent analysis (refs: specs/logging-telemetry.md:228-230)
+  - Provide UI link or documentation pointer to session files
+  - Files contain detailed subagent execution logs for post-hoc analysis
+
+### 3.17 Iteration Prompt Display in Activity Panel (NEW - Jan 2026 Iteration 6)
+- [ ] Show prompt that was sent at iteration start in activity panel header (refs: specs/logging-telemetry.md:170-181)
+  - Different from P2.4 (editing) - this is display of what was sent
+  - Formatted box at top of activity log showing iteration prompt
+
+### 3.18 IterationMetrics Status Field Implementation (NEW - Jan 2026 Iteration 6)
+- [ ] Include status field in IterationMetrics interface (refs: specs/logging-telemetry.md:89-102)
+  - Status values: "running", "passed", "failed", "timeout"
+  - Display status indicator in iteration card UI
+  - Extends P3.10 with specific status tracking
+
 ---
 
 ## Priority 4: Robustness Improvements
@@ -876,6 +993,24 @@
   - When dashboard disabled, track stepMode in local variable
   - When dashboard enabled, read from `isStepMode()` function
   - Pattern: `const shouldStep = dashboard ? isStepMode() : stepModeEnabled`
+
+### 4.11 Invalid NDJSON Line Tolerance (NEW - Jan 2026 Iteration 6)
+- [ ] Skip unparseable lines and continue stream processing (refs: specs/claude-integration.md:116-120)
+  - If Claude outputs invalid JSON line, skip it and continue
+  - Don't abort entire stream on single malformed line
+  - Log warning but continue parsing subsequent lines
+
+### 4.12 Tool Result Content Normalization (NEW - Jan 2026 Iteration 6)
+- [ ] Handle both string and ContentBlock[] variants of tool_result.content
+  - Some Claude API responses return `content: string`
+  - Others may return `content: ContentBlock[]`
+  - Normalize to consistent format for downstream handling
+
+### 4.13 Git Authentication Priority Documentation (NEW - Jan 2026 Iteration 6)
+- [ ] Document that HTTPS (with token) is preferred, SSH is fallback (refs: specs/networking.md)
+  - When both are available, credential helper (HTTPS) takes precedence
+  - SSH is fallback when GITHUB_TOKEN unavailable
+  - Document this decision in code comments and user docs
 
 ---
 
@@ -962,6 +1097,22 @@
 
 ### 5.12 Volume Mount Validation Tests
 - [ ] Test container creation with various env states (refs: P1.50, P1.55)
+  - Test with HOME undefined
+  - Test with missing .ssh directory
+  - Test with missing .claude directory
+  - Verify correct error messages
+
+### 5.13 GitHub IP Aggregation Tests (NEW - Jan 2026 Iteration 6)
+- [ ] Test aggregate tool with GitHub IP ranges (refs: specs/networking.md:102-114)
+  - Test empty input, single CIDR, overlapping ranges
+  - Verify aggregation produces valid ipset entries
+  - Part of firewall verification tests
+
+### 5.14 SSH Non-Interactive Mode Tests (NEW - Jan 2026 Iteration 6)
+- [ ] Verify SSH operations don't require user input (refs: specs/container.md:213)
+  - Test that SSH doesn't prompt for host key acceptance
+  - Verify UserKnownHostsFile=/dev/null works correctly
+  - Required for non-interactive git operations
   - Test with HOME undefined
   - Test with missing .ssh directory
   - Test with missing .claude directory
@@ -1465,16 +1616,35 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 5)
+### Priority Summary (Updated Jan 2026 - Iteration 6)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 77 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete, 5 new items from iteration 5) |
-| P2 | Dashboard Integration | 16 items | Core UX features |
-| P3 | Missing Functionality | 15 items | Logging/telemetry subsystem + streaming |
-| P4 | Robustness | 10 items | Production readiness |
-| P5 | Test Coverage | 12 items | Quality assurance (P5.9 duplicate of P5.2) |
+| P1 | Critical Integration | 88 items | Blocking basic functionality (includes 3 CRITICAL security: P1.49, P1.81, P1.82; 3 verified complete; 11 new items from iteration 6) |
+| P2 | Dashboard Integration | 20 items | Core UX features (4 new: syntax highlighting, collapsible, tables, task timing) |
+| P3 | Missing Functionality | 18 items | Logging/telemetry subsystem + streaming (3 new: session analysis, prompt display, status field) |
+| P4 | Robustness | 13 items | Production readiness (3 new: NDJSON tolerance, content normalization, auth docs) |
+| P5 | Test Coverage | 14 items | Quality assurance (2 new: IP aggregation, SSH non-interactive) |
 | P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
-| **Total** | | **157 items** | ~35-40% complete |
+| **Total** | | **180 items** | ~35% complete |
+
+**Key Findings Iteration 6 (Jan 2026 - Parallel 3-Agent Research)**:
+- **NEW P1.78**: TextDecoder stream mode in DockerLive.execStream (data corruption risk)
+- **NEW P1.79**: parsed.features property validation (unhandled TypeError)
+- **NEW P1.80**: Docker exec exit code capture (silent failures)
+- **NEW P1.81**: Git command injection in GitLive (CRITICAL SECURITY)
+- **NEW P1.82**: Find command injection in listByPrefix (CRITICAL SECURITY)
+- **NEW P1.83**: Error-tolerant command execution pattern (Bun .quiet().nothrow() equivalent)
+- **NEW P1.84**: AbortSignal integration for Claude cancellation
+- **NEW P1.85**: Stdin stream reader for CLI prompts (lock release pattern)
+- **NEW P1.86**: SSH-only git operations fallback
+- **NEW P1.87**: tool_result content type validation (string vs array)
+- **NEW P1.88**: Empty string CLI argument handling
+- **NEW P2.17-P2.20**: Dashboard UI enhancements (syntax highlighting, collapsible, tables, task timing)
+- **NEW P3.16-P3.18**: Logging enhancements (session analysis, prompt display, status field)
+- **NEW P4.11-P4.13**: Robustness improvements (NDJSON tolerance, content normalization, auth priority docs)
+- **NEW P5.13-P5.14**: Test coverage (IP aggregation, SSH non-interactive)
+- **Security Audit**: 3 CRITICAL command injection vulnerabilities identified (P1.49, P1.81, P1.82)
+- **Data Corruption Risk**: TextDecoder without stream option corrupts multi-byte UTF-8 (P1.78)
 
 **Key Findings Iteration 5 (Jan 2026 - Parallel Research with 3 Agents)**:
 - **NEW P1.73**: server.ts Set.delete during iteration - undefined behavior
@@ -1729,4 +1899,37 @@ P1.74 Stream Reader Lock ─────► P2.5 Interactive CLI Prompts
 P1.75 TextDecoder Stream ─────► P3.13 NDJSON Buffer Management
 P1.76 Buffer Processing ──────► P3.13 NDJSON Buffer Management
 P1.77 Container Restart Code ─► P1.10 Container Health Checks
+
+New P1 Items (Jan 2026 - Iteration 6):
+P1.78 TextDecoder Stream Mode ─► DockerLive.execStream (CRITICAL data corruption)
+P1.79 parsed.features Validation ► P1.52 getRemainingFeatures Error Handling
+P1.80 Docker Exec Exit Code ───► P1.59 Exec Exit Code Verification
+P1.81 Git Command Injection ───► CRITICAL SECURITY (immediate fix needed)
+P1.82 Find Command Injection ──► CRITICAL SECURITY (immediate fix needed)
+P1.83 Error-Tolerant Commands ─► P1.9 Startup Cleanup, P1.20 PR Ready
+P1.84 AbortSignal Integration ─► P1.16 AbortController Pattern
+P1.85 Stdin Stream Reader ─────► P2.5 Interactive CLI Prompts
+P1.86 SSH-Only Git Fallback ───► P1.34 Credential Helper Conditional
+P1.87 tool_result Content Type ► P3.11 tool_result Type
+P1.88 Empty String CLI Args ───► P1.51 CLI Numeric Validation
+
+New P2 Items (Jan 2026 - Iteration 6):
+P2.17 Syntax Highlighting ─────► Dashboard UI
+P2.18 Collapsible Tool Calls ──► Dashboard UI
+P2.19 Table Rendering ─────────► Dashboard UI
+P2.20 Task Tool Timing ────────► P3.14 Dual Stream Processing
+
+New P3 Items (Jan 2026 - Iteration 6):
+P3.16 Session JSONL Analysis ──► Documentation
+P3.17 Iteration Prompt Display ► P2.4 Prompt Template Editing
+P3.18 IterationMetrics Status ─► P3.10 IterationMetrics Interface
+
+New P4 Items (Jan 2026 - Iteration 6):
+P4.11 Invalid NDJSON Tolerance ► P3.13 NDJSON Buffer Management
+P4.12 Tool Result Normalization ► P1.87 tool_result Content Type
+P4.13 Git Auth Priority Docs ──► Documentation
+
+New P5 Items (Jan 2026 - Iteration 6):
+P5.13 IP Aggregation Tests ────► P5.7 Firewall Detection Tests
+P5.14 SSH Non-Interactive Tests ► P1.45 UserKnownHostsFile SSH Configuration
 ```
