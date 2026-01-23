@@ -783,6 +783,73 @@
   - Dashboard lifecycle independent of container lifecycle
   - Initialization sequence: server start → set callbacks → update state
 
+### 1.108 DashboardLive Missing REST Endpoints (NEW - Jan 2026 Iteration 8)
+- [ ] Implement REST endpoints in DashboardLive (refs: server.ts:213-300)
+  - **CRITICAL**: DashboardLive only has /events SSE endpoint
+  - Missing: POST /pause, POST /resume, POST /step-mode, POST /stop
+  - Missing: GET /prompt, PUT /prompt, OPTIONS for CORS
+  - Without these, dashboard UI cannot pause, resume, stop, or edit prompts
+  - server.ts has full implementation; DashboardLive needs migration
+
+### 1.109 onStopCallback Registration for Dashboard Stop Button (NEW - Jan 2026 Iteration 8)
+- [ ] Add callback registration mechanism for abort (refs: server.ts:24-28, ralph.ts:415)
+  - server.ts has `onStopCallback` variable and `setOnStopCallback()` function
+  - ralph.ts calls `setOnStopCallback(abortClaude)` to wire stop button
+  - DashboardLive has no mechanism to register external abort callback
+  - Required for P1.16 AbortController pattern to connect to dashboard
+
+### 1.110 ClaudeLive stderr Stream Abandoned (NEW - Jan 2026 Iteration 8)
+- [ ] Consume stderr stream in ClaudeLive.runWithEvents() (refs: ClaudeLive.ts:94-134)
+  - **CRITICAL**: execStream returns stdout AND stderr, only stdout is consumed
+  - Unconsumed stderr can cause process to block when buffer fills
+  - Pattern: `Promise.all([streamStdout(), streamStderr(), proc.exited])` from ralph.ts:319-323
+  - Stderr should be forwarded to dashboard sendOutput or console
+
+### 1.111 GitHub .packages IP Ranges Missing from Firewall (NEW - Jan 2026 Iteration 8)
+- [ ] Add .packages field to GitHub IP whitelist (refs: specs/networking.md:37, docker/init-firewall.sh:76)
+  - Spec mentions github.com/* which includes packages
+  - Current code: `(.web + .api + .git)[]` missing `.packages`
+  - Should be: `(.web + .api + .git + .packages)[]`
+  - Package downloads from GitHub Packages may be blocked without this
+
+### 1.112 Feature Schema Extended Fields Not Supported (NEW - Jan 2026 Iteration 8)
+- [ ] Support additional feature fields from template (refs: templates/ralph-instructions.md:56-67)
+  - Template supports: `acceptance`, `verification`, `steps` fields
+  - src/types.ts:3-8 only defines: `id`, `description`, `passes`, `verify_command`
+  - Add optional fields to Feature interface to match template expectations
+
+### 1.113 Initial SSE Connection Events Incomplete (NEW - Jan 2026 Iteration 8)
+- [ ] Send complete initial state on SSE connection (refs: server.ts:136-167)
+  - DashboardLive.ts:135-140 sends only state event
+  - server.ts sends THREE events: state, iteration, features
+  - Missing initial iteration and features events causes stale dashboard display
+
+### 1.114 import.meta.dir vs process.cwd() Path Resolution (NEW - Jan 2026 Iteration 8)
+- [ ] Use import.meta.dir for template path resolution (refs: ralph.ts:72, 408, 413)
+  - ralph.ts: `const RALPH_HOME = import.meta.dir` (portable, absolute)
+  - program.ts:39 uses `process.cwd()` (fragile, can change)
+  - Paths break if Ralph invoked from different directory
+  - Extends P1.56 with specific pattern recommendation
+
+### 1.115 JSON.parse in Pure Function Without Error Handling (NEW - Jan 2026 Iteration 8)
+- [ ] Wrap JSON.parse in getRemainingFeatures (refs: src/container.ts:42)
+  - `getRemainingFeatures` is pure function that throws on malformed JSON
+  - Error won't be wrapped in Effect error types when called from Effect context
+  - Either convert to Effect-returning function or add try-catch
+
+### 1.116 hasUnpushedCommits Error vs Empty Distinction (NEW - Jan 2026 Iteration 8)
+- [ ] Distinguish command failure from no commits in GitLive (refs: GitLive.ts:94-109)
+  - `git log origin/${branch}..HEAD` fails if remote branch doesn't exist
+  - Current: All errors wrapped as GitError, caller can't distinguish
+  - Should return distinct result for "command failed" vs "no commits"
+  - Affects circuit breaker logic in program.ts:254
+
+### 1.117 DashboardLive Async/Await Mixed with Effect (NEW - Jan 2026 Iteration 8)
+- [ ] Refactor Bun.serve callback to use Effect properly (refs: DashboardLive.ts:170)
+  - Uses `await file.exists()` mixing async/await with Effect code
+  - Errors from file operations won't be caught by Effect error handling
+  - Use Effect.tryPromise or Effect.promise for consistency
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -945,6 +1012,40 @@
   - Interface not defined in codebase
   - Correlate tool_use ID with tool_result
   - Track start time, elapsed time, completion status
+
+### 2.25 Static File MIME Type Handling (NEW - Jan 2026 Iteration 8)
+- [ ] Add MIME type mapping to DashboardLive static file serving (refs: server.ts:176-210)
+  - server.ts has MIME_TYPES map for .html, .css, .js, .json, .png, .jpg, .svg, .ico
+  - DashboardLive serves files without proper Content-Type headers
+  - Dashboard assets may not load correctly in browsers
+
+### 2.26 Helpful 404 Error for Missing Dashboard Build (NEW - Jan 2026 Iteration 8)
+- [ ] Add build instructions in 404 response (refs: server.ts:206-208)
+  - server.ts: "Dashboard not found. Run: cd dashboard && bun install && bun run build"
+  - DashboardLive returns generic "Not Found"
+  - Guides users to fix missing dashboard build
+
+### 2.27 distDir Path Normalization (NEW - Jan 2026 Iteration 8)
+- [ ] Normalize dashboard path to extract distDir (refs: server.ts:214-215)
+  - Pattern: `dashboardPath.replace(/\/index\.html$/, "")`
+  - Handles case where path includes index.html
+  - DashboardLive.ts:168 concatenates paths directly
+
+### 2.28 POST /rerun Endpoint Implementation (NEW - Jan 2026 Iteration 8)
+- [ ] Add /rerun endpoint for iteration re-runs (refs: specs/logging-telemetry.md:245-255)
+  - Accept modified prompt in request body
+  - Re-run as iteration N+1 on same branch
+  - Related to P3.19 but specific endpoint implementation
+
+### 2.29 GET /iterations Endpoint Implementation (NEW - Jan 2026 Iteration 8)
+- [ ] Add /iterations endpoint for sidebar recovery (refs: specs/logging-telemetry.md:273-283)
+  - Return IterationsResponse with iteration list and metrics
+  - Enables browser to recover iteration sidebar state on reconnect
+
+### 2.30 GET /logs/:iteration Endpoint Implementation (NEW - Jan 2026 Iteration 8)
+- [ ] Add /logs/:iteration endpoint for log replay (refs: specs/logging-telemetry.md:282-283)
+  - Return raw JSONL events for specific iteration
+  - Required for loading historical iteration logs
 
 ---
 
@@ -1331,6 +1432,18 @@
   - Verify iteration always increments by exactly 1
   - Verify noChangeCount never goes negative
   - Test boundary conditions near maxIterations
+
+### 5.19 stderr Stream Consumption Tests (NEW - Jan 2026 Iteration 8)
+- [ ] Test stderr stream is consumed in ClaudeLive (refs: P1.110)
+  - Verify stderr stream doesn't cause process blocking
+  - Test with large stderr output
+  - Verify no resource leaks when stream cancelled
+
+### 5.20 Host Network Detection Tests (NEW - Jan 2026 Iteration 8)
+- [ ] Test host IP detection in firewall (refs: docker/init-firewall.sh:110-118)
+  - Test host IP extraction from default route
+  - Test /24 network computation
+  - Critical networking code has no tests
 
 ---
 
@@ -1830,16 +1943,33 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 7)
+### Priority Summary (Updated Jan 2026 - Iteration 8)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 107 items | Blocking basic functionality (includes 3 CRITICAL security: P1.49, P1.81, P1.82; 3 verified complete; 19 new items from iteration 7) |
-| P2 | Dashboard Integration | 24 items | Core UX features (4 new: iteration display, final verification messages, exit message, subagent tracker) |
-| P3 | Missing Functionality | 21 items | Logging/telemetry subsystem + streaming (3 new: rerun endpoint, session recovery, error display) |
-| P4 | Robustness | 18 items | Production readiness (5 new: truncation indicator, partial init, network timeout, concurrent modification, circular deps) |
-| P5 | Test Coverage | 18 items | Quality assurance (4 new: SSE race, stream cancellation, feature validation, state invariants) |
+| P1 | Critical Integration | 117 items | Blocking basic functionality (includes 3 CRITICAL security: P1.49, P1.81, P1.82; 3 verified complete; 10 new items from iteration 8) |
+| P2 | Dashboard Integration | 30 items | Core UX features (6 new from iteration 8: MIME types, 404 help, distDir, /rerun, /iterations, /logs/:iteration) |
+| P3 | Missing Functionality | 21 items | Logging/telemetry subsystem + streaming |
+| P4 | Robustness | 18 items | Production readiness |
+| P5 | Test Coverage | 20 items | Quality assurance (2 new: stderr tests, host network tests) |
 | P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
-| **Total** | | **215 items** | ~35% complete |
+| **Total** | | **233 items** | ~35% complete |
+
+**Key Findings Iteration 8 (Jan 2026 - Parallel 3-Agent Research)**:
+- **NEW P1.108-P1.117**: 10 new P1 items from comprehensive gap analysis
+  - P1.108: DashboardLive missing REST endpoints (CRITICAL - dashboard non-functional without these)
+  - P1.109: onStopCallback registration for dashboard stop button
+  - P1.110: ClaudeLive stderr stream abandoned (CRITICAL - can cause process blocking)
+  - P1.111: GitHub .packages IP ranges missing from firewall
+  - P1.112: Feature schema extended fields not supported
+  - P1.113: Initial SSE connection events incomplete
+  - P1.114: import.meta.dir vs process.cwd() path resolution
+  - P1.115: JSON.parse in pure function without error handling
+  - P1.116: hasUnpushedCommits error vs empty distinction
+  - P1.117: DashboardLive async/await mixed with Effect
+- **NEW P2.25-P2.30**: 6 new P2 items (dashboard REST endpoints, MIME types, error messages)
+- **NEW P5.19-P5.20**: 2 new P5 items (stderr tests, host network tests)
+- **Analysis Coverage**: Source code analysis (20 issues), Legacy comparison (10 gaps), Spec coverage (24 gaps)
+- **Major Finding**: DashboardLive is structurally incomplete - has SSE but no REST API for controls
 
 **Key Findings Iteration 7 (Jan 2026 - Parallel 3-Agent Research)**:
 - **NEW P1.89-P1.107**: 19 new P1 items from comprehensive gap analysis
@@ -2174,4 +2304,28 @@ P4.13 Git Auth Priority Docs ──► Documentation
 New P5 Items (Jan 2026 - Iteration 6):
 P5.13 IP Aggregation Tests ────► P5.7 Firewall Detection Tests
 P5.14 SSH Non-Interactive Tests ► P1.45 UserKnownHostsFile SSH Configuration
+
+New P1 Items (Jan 2026 - Iteration 8):
+P1.108 DashboardLive REST ───────► P2.1 Remove Legacy server.ts (migration of endpoints)
+P1.109 onStopCallback ───────────► P1.16 AbortController Pattern
+P1.110 stderr Stream Consumption ► P6.5 Separate Stderr Streaming
+P1.111 GitHub .packages IPs ─────► Firewall (standalone)
+P1.112 Feature Schema Fields ────► types.ts (standalone)
+P1.113 Initial SSE Events ───────► P2.14 Dashboard State Init Sequence
+P1.114 import.meta.dir Path ─────► P1.56 RALPH_HOME Resolution
+P1.115 JSON.parse Error Handling ► P1.52 getRemainingFeatures Error Handling
+P1.116 hasUnpushedCommits Error ─► P1.61 GitLive Dual-Path Implementation
+P1.117 Async/Await Effect Mix ───► DashboardLive refactor
+
+New P2 Items (Jan 2026 - Iteration 8):
+P2.25 MIME Type Handling ────────► P2.1 Remove Legacy server.ts
+P2.26 404 Error Message ─────────► P2.8 Static File Serving
+P2.27 distDir Path Normalization ► P2.8 Static File Serving
+P2.28 POST /rerun Endpoint ──────► P3.19 POST /rerun Implementation
+P2.29 GET /iterations Endpoint ──► P3.20 Session Recovery
+P2.30 GET /logs/:iteration ──────► P3.20 Session Recovery
+
+New P5 Items (Jan 2026 - Iteration 8):
+P5.19 stderr Stream Tests ───────► P1.110 stderr Stream Consumption
+P5.20 Host Network Detection ────► Firewall tests (standalone)
 ```
