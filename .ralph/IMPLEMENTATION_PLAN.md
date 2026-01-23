@@ -5559,3 +5559,202 @@ Running totals:
 - P5 items: 75 (was 72)
 - P6 items: 70 (was 68)
 - Grand total: 658 items (was 617)
+
+---
+
+## Iteration 23 Research (Jan 2026)
+
+### New P1 Items (Critical Gaps from Spec)
+
+P1.266 Plan Mode Implementation ► src/program.ts, specs/orchestrator.md:175-176
+  - Gap: --mode plan flag parsed but no distinct plan mode workflow implemented
+  - Missing: Plan mode initialization, feature filtering, plan-specific PR creation
+  - Spec requires different behavior for plan vs build mode
+  - Impact: Plan mode produces incorrect results or fails silently
+  - Fix: Implement PlanModeService or conditional logic in orchestration loop
+
+P1.267 Firewall Functional Verification ► docker/init-firewall.sh, specs/networking.md:116-143
+  - Gap: P1.2 detects "Ralph Firewall Ready" message but doesn't verify firewall works
+  - Spec requires DNS test (npx), SSH test (git ls-remote), domain connectivity
+  - Impact: Firewall may be "ready" but misconfigured, allowing Claude internet access
+  - Fix: Run verification commands after detecting ready message, fail if tests fail
+
+P1.268 MCP Servers Integration ► specs/claude-integration.md
+  - Gap: Claude system events include mcp_servers field, not handled
+  - Unknown behavior when MCP servers unavailable or fail to start
+  - Impact: Claude may fail silently or behave unexpectedly
+  - Fix: Document MCP handling or implement error detection for MCP failures
+
+P1.269 Features.json Dependency Field ► specs/features.md:214-225
+  - Gap: Spec shows features with dependency ordering
+  - Feature interface lacks dependency field
+  - No circular dependency detection
+  - P1.47 validates schema but not dependencies
+  - Impact: Features may run in wrong order, causing verification failures
+  - Fix: Add dependencies array to Feature interface, implement topological sort
+
+P1.270 Logging/Telemetry Service ► specs/logging-telemetry.md, src/services/
+  - Gap: Spec defines .ralph/sessions/ directory structure and JSONL logging
+  - No LoggingService implementation exists
+  - DashboardLive.ts has no JSONL append functionality
+  - Impact: No session history, no audit trail, no replay capability
+  - Fix: Create LoggingService with JSONL file writing per session/iteration
+
+P1.271 Session State Recovery Endpoints ► specs/logging-telemetry.md:260-284
+  - Gap: Spec describes state recovery on reconnect
+  - Missing /iterations and /logs/:iteration endpoints
+  - No iteration metrics tracking or session persistence
+  - Impact: Dashboard reconnect loses all history
+  - Fix: Add iteration history endpoint, persist state to disk
+
+P1.272 SSH Key Permissions Validation ► docker/entrypoint.sh
+  - Gap: SSH key must have 600 permissions
+  - No validation that mounted key has correct permissions
+  - Impact: Git operations fail silently with "permissions too open" error
+  - Fix: Add chmod 600 check or explicit chmod in entrypoint
+
+P1.273 Environment Variable Injection Protection ► src/layers/ConfigLive.ts
+  - Gap: GIT_AUTHOR_NAME, GITHUB_TOKEN passed to shell without sanitization
+  - Could contain shell metacharacters enabling injection
+  - Impact: Security vulnerability - arbitrary command execution
+  - Fix: Validate/sanitize all env vars before shell interpolation
+
+P1.274 Container Resource Limits ► src/layers/DockerLive.ts, specs/container.md
+  - Gap: Spec defines capabilities but not memory/CPU limits
+  - No --memory, --cpus flags in docker create
+  - Impact: Runaway containers exhaust host resources
+  - Fix: Add configurable resource limits (--memory=4g, --cpus=2 defaults)
+
+P1.275 Feature ID Max Length Validation ► specs/features.md:28
+  - Gap: Spec says IDs must be short, no max length enforced
+  - Branch naming truncates to 25 chars but ID validation missing
+  - Impact: Long IDs cause branch/container naming issues
+  - Fix: Add max length validation (32 chars suggested)
+
+### New P2 Items (Architecture)
+
+P2.112 ZFC Compliance Validation ► specs/zfc-architecture.md:261-280
+  - Gap: Spec defines ZFC compliance checklist
+  - No orchestrator validation of prompt instructions for ZFC compliance
+  - No prevention of semantic analysis patterns (P.263)
+  - Impact: Prompts may violate ZFC principles causing inconsistent behavior
+  - Fix: Add ZFC compliance linter or validation step for prompt templates
+
+P2.113 Docker Image Update Workflow ► docker/Dockerfile.base, CLAUDE.md
+  - Gap: Build command documented but no automated rebuild on changes
+  - No script to rebuild image if Dockerfile changes
+  - P1.67 validates existence but not freshness
+  - Impact: Stale images may have outdated dependencies
+  - Fix: Add build-image.sh script, consider image versioning
+
+P2.114 Configuration Schema File ► specs/features.md
+  - Gap: Features.json schema in prose but no machine-readable schema
+  - No JSON schema file for validation
+  - Impact: Validation fragile, client/server mismatches possible
+  - Fix: Create features.schema.json, use in validation
+
+### New P3 Items (Robustness)
+
+P3.75 Prompt Template Validation ► templates/*.md
+  - Gap: Templates referenced but not validated for syntax/format
+  - No versioning or backwards compatibility handling
+  - Impact: Malformed templates cause Claude invocation failures
+  - Fix: Add template validation step, check required placeholders exist
+
+P3.76 Integration Test for Full Orchestration ► specs/orchestrator.md:6-51
+  - Gap: Spec defines complete flow, only unit tests exist
+  - No end-to-end test with all major components
+  - Impact: Integration issues not caught until manual testing
+  - Fix: Create integration test using TestLive layer composition
+
+P3.77 Firewall Network Test Suite ► specs/networking.md:116-133
+  - Gap: Spec defines verification commands, no test implementation
+  - Cannot verify firewall actually working
+  - Impact: Firewall configuration issues not detected
+  - Fix: Implement verification test suite for firewall rules
+
+P3.78 Error Recovery Test Cases ► src/program.ts
+  - Gap: No tests for partial failure recovery
+  - Container created but clone fails - cleanup tested?
+  - Signal handling (SIGINT, SIGTERM) not tested
+  - Impact: Partial failures may leave orphan resources
+  - Fix: Add failure injection tests for recovery paths
+
+P3.79 Subagent Event Handling ► specs/logging-telemetry.md:183-230
+  - Gap: Task tool spawns subagents with partial visibility
+  - No handling for subagent timing or prompt data
+  - Dashboard logging references Task tracking but implementation missing
+  - Impact: Subagent work invisible in logs and dashboard
+  - Fix: Parse and track Task tool events, correlate with main agent
+
+P3.80 Large Features Array Performance ► dashboard/src/
+  - Gap: No handling for 100+ features
+  - No pagination or chunking strategy
+  - Dashboard.broadcast may saturate network
+  - Impact: Performance degradation with many features
+  - Fix: Implement pagination or virtual scrolling
+
+### New P4 Items (Polish)
+
+P4.64 Prompt Edit & Re-run UI ► specs/logging-telemetry.md:232-257
+  - Gap: Spec details re-run functionality
+  - No POST /rerun endpoint
+  - No iteration-specific prompt replay UI
+  - Impact: Debugging requires full restart
+  - Fix: Add re-run API and UI controls
+
+P4.65 Unicode in Feature Descriptions ► specs/features.md
+  - Gap: Spec doesn't address non-ASCII characters
+  - No handling for CJK, emoji, RTL text
+  - JSON escaping may be incomplete
+  - Impact: Non-ASCII features may display incorrectly
+  - Fix: Ensure proper Unicode handling throughout
+
+### New P5 Items (Consistency)
+
+P5.76 Build Script for Docker Image ► docker/
+  - Gap: Manual docker build command in CLAUDE.md
+  - No wrapper script for automated builds
+  - Impact: Users must remember exact command
+  - Fix: Add docker/build-image.sh script
+
+P5.77 Base64 Encoding for Shell Safety ► src/layers/ClaudeLive.ts
+  - Gap: P1.49/P1.68 address escaping but not encoding
+  - Base64 encoding would eliminate all injection vectors
+  - Impact: Shell escaping may have edge cases
+  - Fix: Consider base64-encoding sensitive data before shell execution
+
+---
+
+Iteration 23 Dependency Graph Additions:
+P1.266 Plan Mode ────────────────────► Core orchestration mode
+P1.267 Firewall Verify ──────────────► P1.2 (extends), Security
+P1.268 MCP Servers ──────────────────► Claude invocation reliability
+P1.269 Feature Dependencies ─────────► P1.47 (extends), Feature ordering
+P1.270-271 Logging/Telemetry ────────► New service requirement
+P1.272 SSH Permissions ──────────────► Git authentication reliability
+P1.273 Env Injection ────────────────► P1.49 (related), Security
+P1.274 Resource Limits ──────────────► Container safety
+P1.275 ID Length ────────────────────► P1.11 (related), Branch naming
+
+P2.112-114 Architecture ─────────────► Validation and workflows
+P3.75-80 Robustness ─────────────────► Testing and edge cases
+P4.64-65 Polish ─────────────────────► UI features
+P5.76-77 Consistency ────────────────► Build workflow and security
+
+Summary (Iteration 23):
+- 10 new P1 items (P1.266-P1.275) - Critical spec gaps
+- 3 new P2 items (P2.112-P2.114) - Architecture
+- 6 new P3 items (P3.75-P3.80) - Robustness and testing
+- 2 new P4 items (P4.64-P4.65) - UI polish
+- 2 new P5 items (P5.76-P5.77) - Build and security patterns
+- Total new items: 23
+
+Running totals:
+- P1 items: 275 (was 265)
+- P2 items: 114 (was 111)
+- P3 items: 80 (was 74)
+- P4 items: 65 (was 63)
+- P5 items: 77 (was 75)
+- P6 items: 70 (unchanged)
+- Grand total: 681 items (was 658)
