@@ -1,6 +1,20 @@
 # Implementation Plan
 
-## Research Iteration Summary (Latest)
+## Research Iteration Summary (Latest - Iteration 4)
+
+### Critical Architectural Clarification
+- 🔍 **Discovered parallel implementation systems**: ralph.ts (legacy) + src/main.ts (new Effect-based)
+- 🔍 **server.ts IS used**: Imported by ralph.ts:40, not orphaned as previously thought
+- 📋 **Updated deletion strategy**: Defer ralph.ts + server.ts deletion until src/main.ts is production-ready
+- ✅ **All previous findings reconfirmed**: Tests pass (80/80), TypeScript compiles, main.ts still placeholder
+
+### Verified Status
+- ✅ main.ts placeholder status CONFIRMED (line 17 explicit comment, placeholder values at 30-46)
+- ✅ program.ts gaps CONFIRMED (TODO line 72, no maxIterations check, missing cleanup functions)
+- ✅ features.json error handling MISSING (JSON.parse unprotected at container.ts:42)
+- ✅ Final verification logic EXISTS (program.ts:321-333) but incomplete (no finalVerificationDone flag)
+
+## Research Iteration Summary (Iteration 3)
 
 This iteration reconfirmed previous findings and added critical details:
 
@@ -95,14 +109,16 @@ Must implement missing control flow:
   - Shutdown cleanly: call dashboard.stop() in finally block before exit
   - MISSING: Stream Claude events to dashboard (Priority 3 - requires using runWithEvents instead of run)
 
-- [ ] **Remove legacy server.ts** (refs: src/server.ts, src/layers/DashboardLive.ts)
-  - CONFIRMED: server.ts STILL EXISTS and is UNUSED legacy code (zero imports found via codebase search)
-  - DashboardLive.ts is the ACTIVE Effect-based implementation integrated in MainLive layer (src/layers/index.ts:28-40)
-  - Architectural differences:
-    - server.ts: Imperative style, mutable global state, no cleanup mechanism
-    - DashboardLive.ts: Effect-based, immutable Ref for state, Layer.scoped with finalizer
-  - DECISION CONFIRMED: **Delete src/server.ts entirely** - it's duplicate pre-Effect code
-  - Keep DashboardLive.ts and DashboardTest.ts (active implementation + test mock)
+- [ ] **Remove legacy ralph.ts and server.ts** (refs: ralph.ts, src/server.ts, src/layers/DashboardLive.ts)
+  - CRITICAL CLARIFICATION: Architecture has TWO parallel implementations:
+    - **Legacy (working)**: ralph.ts (main entry) + src/server.ts (dashboard) - imperative, functional
+    - **New (in progress)**: src/main.ts (main entry) + src/layers/DashboardLive.ts (dashboard) - Effect-based, placeholder
+  - server.ts IS used, but ONLY by ralph.ts (1 import at ralph.ts:40)
+  - ralph.ts is a "thin wrapper" (per line 2) that will be replaced once src/main.ts is complete
+  - DashboardLive.ts is integrated in MainLive layer (src/layers/index.ts:39) but not yet operational
+  - DECISION UPDATED: **Do NOT delete yet** - legacy code provides working fallback
+  - After src/main.ts is production-ready, delete both ralph.ts and server.ts in single commit
+  - Keep DashboardLive.ts and DashboardTest.ts (new Effect-based implementation)
 
 ## Priority 2: High - ZFC Compliance & Orchestrator Specs
 
@@ -377,11 +393,16 @@ Must implement missing control flow:
 - Container utilities parse docker/git output correctly
 - **Extend these patterns** - do not rewrite
 
-### Duplicate Dashboard Implementation (RESOLVED)
-- DashboardLive.ts (Effect-based, immutable state via Ref) - ✅ ACTIVE, used in MainLive
-- server.ts (imperative, mutable global state) - ❌ LEGACY, zero imports, should be removed
-- DECISION: Remove server.ts entirely - it's unused pre-Effect code
-- Both files implement identical functionality (SSE streaming, state management, pause/resume)
+### Parallel Dashboard Implementations (TWO ACTIVE SYSTEMS)
+- **Legacy System**: ralph.ts (entry point) + server.ts (dashboard) - imperative, currently functional
+  - ralph.ts at line 40 imports from server.ts (ONLY import location)
+  - This is the working implementation until src/main.ts is complete
+  - Will be deleted together once new system is production-ready
+- **New System**: src/main.ts (entry point) + DashboardLive.ts (dashboard) - Effect-based, in development
+  - DashboardLive.ts is integrated in MainLive layer (src/layers/index.ts:39)
+  - src/main.ts is still placeholder (line 17), not yet operational
+  - Once complete, will replace entire legacy system
+- Both implement identical functionality (SSE streaming, state management, pause/resume)
 - DashboardLive.ts is properly tested via DashboardTest.ts mock layer
 
 ### Template System (CLARIFIED)
@@ -477,7 +498,7 @@ None currently. All dependencies are in place:
 - **Git user config** - configureUser method exists but not called in createSession
 - **Merge conflict handling** - git.push has no retry logic with rebase
 - **Branch auto-generation** - No auto-generation when --branch missing (spec requires it)
-- **server.ts removal** - Legacy unused code still present (zero imports)
+- **Legacy system cleanup** - ralph.ts + server.ts still present (defer deletion until src/main.ts works)
 
 ## Implementation Order Recommendation
 
