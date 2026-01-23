@@ -3931,4 +3931,187 @@ P6.46 Console Inconsistency ──────────► P3.28 LoggingServi
 P6.47 Empty Catch Blocks ─────────────► P1.178 Silent Error Swallow (same)
 P6.48 .nothrow() Pattern ─────────────► P1.83 Error-Tolerant Commands (Effect equivalent)
 P6.49 Dual Implementation ────────────► Migration tracking (meta-item)
+
+New P1 Items (Jan 2026 - Iteration 16):
+P1.194 createSession() Test Coverage ► program.ts:23-200, program.test.ts
+  - 200-line function completely untested
+  - Handles entire session bootstrap: container creation, volumes, firewall wait
+  - Git cloning, workspace setup, permission fixes, git configuration
+  - Branch creation/checkout logic
+  - Critical path - any bug here breaks all sessions
+  - Need integration test with mocked DockerService
+
+P1.195 ClaudeLive Timeout Test Coverage ► ClaudeLive.ts:51-66
+  - TimeoutError mapping at line 53-58
+  - Effect.timeout integration at line 51
+  - Critical for preventing hung iterations
+  - No tests verify timeout behavior actually works
+
+P1.196 GitLive.hasUnpushedCommits Test Coverage ► GitLive.ts:77-110
+  - Two-step git command execution (branch detection + log parsing)
+  - Partial failure scenarios untested
+  - Circuit breaker depends on this function working correctly
+  - Edge case: remote branch doesn't exist
+
+P1.197 DockerLive exec/execStream Test Coverage ► DockerLive.ts:206-243
+  - exec() at line 206-219: Command execution used by all operations
+  - execStream() at line 220-243: Streaming with TextDecoder
+  - Zero test coverage for core Docker execution path
+  - All Claude and Git operations depend on these
+
+P1.198 DockerLive File Operations Test Coverage ► DockerLive.ts:244-288
+  - readFile() at line 244-263: features.json reading
+  - writeFile() at line 265-288: Stream-based stdin piping
+  - Core to iteration logic (features.json access)
+  - Large file streaming behavior untested
+
+P1.199 ClaudeLive Event Streaming Test Coverage ► ClaudeLive.ts:69-134
+  - NDJSON parsing integration
+  - Stream timeout at line 118
+  - Error mapping at line 120-131
+  - Dashboard depends on event stream working correctly
+  - No tests for partial stream, connection loss scenarios
+
+P1.200 ConfigLive Environment Validation Tests ► ConfigLive.ts:30-67
+  - CLAUDE_CODE_OAUTH_TOKEN validation at line 35-42
+  - Git root detection at line 50
+  - Startup failures should have explicit tests
+  - Edge cases: invalid git repo, missing token
+
+P1.201 getRemainingFeatures Malformed JSON ► container.ts:41-47
+  - No test for malformed JSON handling
+  - JSON.parse will throw, not handled gracefully
+  - Should return FeatureError instead of uncaught exception
+
+P1.202 parseNDJSON Chunked Input Edge Case ► ndjson.ts:11-38
+  - No test for partial JSON across chunk boundaries
+  - Stream may deliver split JSON lines
+  - Could cause parse failures in production
+
+P1.203 Docker Exec Exit Code Handling ► DockerLive.ts:206-219
+  - Command.string only returns stdout
+  - Non-zero exit codes not captured
+  - Silent failures possible for commands that fail
+
+New P2 Items (Jan 2026 - Iteration 16):
+P2.65 GitLive Push Failure Handling ► GitLive.ts:58-75
+  - Push rejection (conflicts, force-push needed) untested
+  - Should return specific GitError for push failures
+  - Currently may propagate generic error
+
+P2.66 GitLive Checkout Failure Scenarios ► GitLive.ts:19-44
+  - Branch doesn't exist, dirty working tree
+  - Checkout failure scenarios not tested
+  - May silently fail or throw wrong error type
+
+P2.67 ClaudeLive Non-Zero Exit Code Handling ► ClaudeLive.ts:40-67
+  - run() creates ClaudeError for exitCode !== 0
+  - No test verifies this error handling path
+  - Important for detecting Claude CLI failures
+
+P2.68 Server.ts Mutable State Thread Safety ► server.ts:8-9
+  - Global mutable state: `const state: DashboardState = {...}`
+  - Spec requires Effect Ref for thread-safe updates
+  - Race conditions possible with concurrent SSE clients
+  - Should migrate to DashboardLive service
+
+P2.69 Dashboard Server Endpoints Test Coverage ► server.ts:213-300
+  - /events SSE endpoint at line 223-232
+  - /pause, /resume at line 235-241
+  - /step-mode at line 244-253
+  - /stop at line 256-263
+  - All endpoints untested
+
+New P3 Items (Jan 2026 - Iteration 16):
+P3.31 Iteration Sidebar UI Component ► specs/logging-telemetry.md:79-110
+  - Spec requires iteration cards with metrics
+  - Token count and context percentage per iteration
+  - No IterationSidebar.tsx component exists in dashboard/
+
+P3.32 Activity Log Syntax Highlighting ► specs/logging-telemetry.md:113-180
+  - Tool calls should be expanded by default
+  - Syntax highlighting for code blocks
+  - Collapsible summaries
+  - ActivityLog.tsx exists but lacks these features
+
+P3.33 Subagent Tracking UI ► specs/logging-telemetry.md:183-230
+  - Track Task tool invocations with timing
+  - Display spinner during Task execution
+  - No subagent tracking logic in dashboard
+
+P3.34 Prompt Editing and Re-run ► specs/logging-telemetry.md:233-258
+  - Edit prompt in dashboard UI
+  - POST /rerun endpoint to restart with modified prompt
+  - Neither endpoint nor UI exists
+
+P3.35 State Recovery Endpoints ► specs/logging-telemetry.md:261-284
+  - GET /iterations - list with metrics
+  - GET /logs/:iteration - JSONL events for iteration
+  - Neither endpoint exists in server.ts
+
+New P4 Items (Jan 2026 - Iteration 16):
+P4.32 generateContainerName Validation ► container.ts:19-25
+  - No validation of sessionId format
+  - Could produce invalid Docker container names
+  - Add regex validation for safe container naming
+
+P4.33 parseStaleContainers Partial Line ► container.ts:27-32
+  - No test for partial line output from docker ps
+  - May occur with buffered output
+  - Edge case worth considering
+
+New P5 Items (Jan 2026 - Iteration 16):
+P5.52 Test: Stream Cancellation Resource Cleanup ► ndjson.ts, ClaudeLive.ts
+  - Stream cancellation/cleanup not tested
+  - Resource leaks possible if streams not properly closed
+  - Backpressure handling untested
+
+P5.53 Test: DockerLive Container Lifecycle ► DockerLive.ts:40-205
+  - create() at line 40-98: Argument building, image/command
+  - start() at line 100-113
+  - remove() at line 115-135: Force flag
+  - inspect() at line 137-205: Running state, status, ID parsing
+  - Zero test coverage for container lifecycle
+
+P5.54 Test: DashboardLive SSE Broadcasting ► DashboardLive.ts:23-59
+  - broadcastToClients() at line 23-35: Client tracking, error handling
+  - updateAndBroadcast() at line 54-59: State sync
+  - No test coverage for SSE functionality
+
+P5.55 Test: detectGitRoot Not In Git Repo ► ConfigLive.ts:14-25
+  - Should return ConfigError when not in git repo
+  - Currently untested edge case
+  - Important for clear error messaging
+
+New P6 Items (Jan 2026 - Iteration 16):
+P6.50 Context.Tag Workaround Pattern ► ClaudeLive.ts:18-19, GitLive.ts:16-17, DashboardLive.ts:61-62
+  - Three services use `as any` workaround for Context.Tag issue
+  - Comments reference ralph-progress.txt effect-020 notes
+  - Consider filing Effect issue or finding proper solution
+  - Technical debt that may cause issues with Effect updates
+
+P6.51 Test Mock Pattern: Effect.fail("not implemented") ► program.test.ts (12 occurrences)
+  - execStream stdout/stderr and runWithEvents use Effect.fail
+  - Inconsistent with how other mocks work (return values)
+  - Could mask issues if these code paths are exercised
+  - Consider making mocks more realistic
+
+Iteration 16 Dependency Graph Additions:
+P1.194 createSession Tests ───────────► P1.1 Main Entry Point (critical path)
+P1.195 Timeout Tests ─────────────────► P1.57 One-Hour Safety Timeout (validates)
+P1.196 hasUnpushedCommits Tests ──────► P1.19 Unpushed Detection (validates)
+P1.197-P1.198 Docker Tests ───────────► All Docker operations (foundation)
+P1.199 Event Streaming Tests ─────────► Dashboard integration (validates)
+P1.200 ConfigLive Tests ──────────────► P1.6 Environment Validation (validates)
+P1.201 Malformed JSON ────────────────► P1.52 getRemainingFeatures Error (extends)
+P1.202 Chunked Input ─────────────────► Stream robustness (edge case)
+P1.203 Exit Code Handling ────────────► P1.80 Docker Exec Exit Code (same)
+P2.65-P2.67 Git/Claude Errors ────────► Error handling robustness
+P2.68 Server Thread Safety ───────────► P2.64 Duplicate Dashboard (consolidation)
+P2.69 Server Endpoint Tests ──────────► P3.35 State Recovery Endpoints (validates)
+P3.31-P3.35 Dashboard Features ───────► specs/logging-telemetry.md compliance
+P4.32-P4.33 Container Utilities ──────► Edge case handling
+P5.52-P5.55 Test Coverage ────────────► Comprehensive testing goal
+P6.50 Context.Tag Workaround ─────────► Technical debt
+P6.51 Test Mock Pattern ──────────────► Test quality
 ```
