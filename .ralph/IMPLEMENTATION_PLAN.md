@@ -21,6 +21,7 @@
 ### Stream Processing
 - [x] NDJSON parsing utilities (parseNDJSON, parseNDJSONWithFallback, fromReadableStream, collectAll, forEach)
 - [x] Comprehensive error handling with StreamError
+- Note: parseNDJSON has comprehensive tests; other utilities (parseNDJSONWithFallback, fromReadableStream, collectAll, forEach) have no dedicated tests
 
 ### Error Types
 - [x] Tagged error types (ConfigError, DockerError, ContainerNotFoundError, ClaudeError, TimeoutError, GitError, FeatureError, CircuitBreakerError, StreamError, ValidationError)
@@ -183,11 +184,13 @@
   - Extend timeout if Claude is making progress (streaming events)
   - Add configurable timeout via CLI
 
-### 4.4 Startup Cleanup
+### 4.4 Startup Cleanup (Should be P1 per specs)
 - [ ] Clean up stale containers on startup (refs: specs/orchestrator.md:10-21)
+  - Per specs, `cleanupStaleContainers()` should run BEFORE `createSession()`
   - Use DockerService.listByPrefix("ralph-") to find orphaned containers
   - Remove stale containers before starting new session
-  - Add to createSession startup sequence
+  - Add to main.ts startup sequence, not createSession
+  - Note: Spec priority is higher than current P4 placement
 
 ### 4.5 Error Recovery with Retry Logic
 - [ ] Implement retry with exponential backoff for transient failures
@@ -227,6 +230,14 @@
   - Circuit breaker triggering after 3 no-change iterations
   - Feature completion detection
   - Signal handling (if practical to test)
+
+### 5.5 Stream Utility Tests
+- [ ] Add tests for remaining ndjson.ts utilities (refs: src/streams/ndjson.ts:41-101)
+  - `parseNDJSONWithFallback()` - discriminated union return, mixed JSON/text handling
+  - `fromReadableStream()` - WHATWG ReadableStream conversion
+  - `collectAll()` - stream-to-array collection
+  - `forEach()` - side-effect iteration
+  - Currently only `parseNDJSON()` has comprehensive tests
 
 ---
 
@@ -285,10 +296,21 @@
 - Consistent with specs but worth noting for future flexibility
 
 ### Missing Test Coverage Areas
-- 0% coverage on service layer implementations (DockerLive, ClaudeLive, GitLive)
-- 0% coverage on createSession() function
-- 0% coverage on dashboard server endpoints
+- 0% coverage on service layer implementations (DockerLive, ClaudeLive, GitLive, ConfigLive, DashboardLive)
+- 0% coverage on createSession() function (177 lines, critical path)
+- 0% coverage on dashboard server endpoints (server.ts, 301 lines)
+- 0% coverage on main.ts entry point (69 lines)
 - No integration tests for full orchestration lifecycle
+- ~59% coverage on ndjson.ts (parseNDJSON tested, 4 other utilities untested)
+
+### Hardcoded Values Requiring Attention
+- Claude model: `"claude-opus-4-5-20251101"` hardcoded in ClaudeLive.ts (lines 27, 76)
+- Config timeout: `5 * 60 * 1000` ms hardcoded in ConfigLive.ts (line 60)
+- Claude operation timeout: `10 * 60 * 1000` ms hardcoded in program.ts (line 244)
+- Firewall wait: `"3 seconds"` hardcoded in program.ts (line 75)
+- Circuit breaker threshold: `3` iterations hardcoded in program.ts (lines 297, 324, 328)
+- Docker image: `"ralph-base:latest"` hardcoded in program.ts (line 34)
+- All paths assume `process.env.HOME` exists and has `.ssh` and `.claude` directories
 
 ---
 
@@ -303,17 +325,42 @@
 
 ## Implementation Notes
 
-### ZFC Compliance
+### ZFC Compliance (Critical Design Principle)
 Per specs/zfc-architecture.md, the orchestrator must remain a "thin, safe, deterministic shell":
 - All reasoning delegated to Claude
 - Orchestrator handles only IO, plumbing, and policy enforcement
 - No heuristic decision-making in orchestrator code
 
+**Allowed Operations**:
+- Pure IO: Read/write files, execute Docker commands, parse/serialize structured data
+- Structural validation: JSON schema validation, required fields checks
+- Policy enforcement: Max iterations budget, circuit breaker (3 no-change), timeout enforcement
+- Mechanical transforms: Parameter substitution, CLI parsing, NDJSON stream parsing
+- State management: Iteration tracking, progress monitoring, dashboard state updates
+- Typed error handling: Use `_tag` discriminated unions, handle via `Effect.catchTag()`
+
+**Forbidden Operations**:
+- No ranking/scoring/selection: Cannot choose features based on complexity heuristics
+- No semantic analysis: Cannot infer meaning from text content or keyword matching
+- No heuristic classification: Cannot route based on keywords like "done", "complete", "error"
+- No quality judgment: Cannot reject commits based on code quality scores
+- No pattern matching on AI output: Must use structured data (features.json) or exit codes
+
 ### Branch Naming Convention
 `ralph/MMDD-HHMM-{feature-slug}` per specs/orchestrator.md
 
-### CI Gate Requirement
-Per specs/features.md, Claude must run full CI suite (typecheck, tests, build) before marking any feature as `passes: true`
+### CI Gate Requirement (Critical)
+Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite before marking ANY feature as `passes: true`:
+1. `bun run typecheck` (or project equivalent)
+2. `bun test` (or project equivalent)
+3. `bun run build` (if build script exists)
+4. Feature's `verify_command` (if present)
+
+**Rules (ZFC-compliant, enforced by Claude)**:
+- Claude CANNOT mark `passes: true` until ALL checks pass
+- Claude CANNOT commit until ALL checks pass
+- Claude CANNOT move to next feature until ALL checks pass
+- If CI fails, Claude must fix issues and rerun CI
 
 ### Phased Implementation for Logging (per specs/logging-telemetry.md:300-330)
 - Phase 1: LoggingService with JSONL append, iteration boundaries, recovery endpoints
@@ -328,8 +375,8 @@ Per specs/features.md, Claude must run full CI suite (typecheck, tests, build) b
 | P1 | Critical Integration | 8 items | Blocking basic functionality |
 | P2 | Dashboard Integration | 4 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
-| P4 | Robustness | 5 items | Production readiness |
-| P5 | Test Coverage | 4 items | Quality assurance |
+| P4 | Robustness | 5 items | Production readiness (note: P4.4 should be P1) |
+| P5 | Test Coverage | 5 items | Quality assurance |
 
 ### Dependency Graph
 ```
