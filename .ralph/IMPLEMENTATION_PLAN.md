@@ -520,6 +520,45 @@
   - Claude Code needs write access for session state storage
   - This is a security-functionality tradeoff, but necessary for operation
 
+### 1.67 Docker Image Existence Verification (NEW - Jan 2026 Iteration 4)
+- [ ] Verify ralph-base:latest image exists before container creation (refs: program.ts:34)
+  - Run `docker images ralph-base:latest --format "{{.Repository}}"` at startup
+  - Fail fast with clear error: "ERROR: Docker image ralph-base:latest not found. Run: docker build -t ralph-base:latest -f docker/Dockerfile.base docker/"
+  - Prevents cryptic Docker error mid-setup
+
+### 1.68 Heredoc Quoted EOF Security Pattern (NEW - Jan 2026 Iteration 4)
+- [ ] Use single-quoted heredoc markers for file writes (refs: ralph.ts:221-223, 507-509)
+  - Pattern: `cat << 'EOF'` not `cat << EOF`
+  - Single quotes prevent variable expansion and command substitution
+  - **SECURITY**: Prevents injection if file content contains `$`, backticks, or `$()`
+  - Affects P1.12 (features.json) and P1.15 (prompt template) writes
+
+### 1.69 Feature Slug Sanitization (NEW - Jan 2026 Iteration 4)
+- [ ] Sanitize feature names for branch naming (refs: ralph.ts:57)
+  - Pattern: `.replace(/[^a-z0-9-]/gi, '-').slice(0, 25)`
+  - Removes all non-alphanumeric except hyphens
+  - Truncates to 25 characters per spec
+  - Required for P1.11 branch name generation
+
+### 1.70 GitHub Token CLI Fallback (NEW - Jan 2026 Iteration 4)
+- [ ] Fall back to `gh auth token` if GITHUB_TOKEN not set (refs: ralph.ts:160-161)
+  - Pattern: `await Bun.$\`gh auth token\`.text().catch(() => "")`
+  - Extends P1.6 environment validation
+  - Allows users without GITHUB_TOKEN env var to use authenticated gh CLI
+
+### 1.71 Shell Escaping in Docker Exec Commands (NEW - Jan 2026 Iteration 4)
+- [ ] Escape special characters in internal command construction (refs: DockerLive.ts:209, GitLive.ts)
+  - Different from P1.49 (prompt injection from external input)
+  - Internal commands may include branch names, file paths with special chars
+  - Example: branch `feature/test"branch` would break `sh -c "git checkout ${branch}"`
+  - Use array-based command construction or proper shell escaping
+
+### 1.72 Thinking Block Filtering for Dashboard (NEW - Jan 2026 Iteration 4)
+- [ ] Hide Claude `thinking` content blocks from dashboard display (refs: specs/logging-telemetry.md:166-169)
+  - Spec: "Claude's `thinking` content blocks are **hidden by default**. No toggle needed for MVP."
+  - Filter out content blocks with `type: "thinking"` before broadcasting to dashboard
+  - Still log to JSONL for debugging if needed
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -1267,19 +1306,37 @@ There is NO `dependencies` field in the spec. P1.47 was updated to reflect this.
   - Affects: src/layers/DockerLive.ts:206-219
   - Mitigated by: Commands come from trusted internal sources
 
-### Implementation Completeness Update (Jan 2026 - Iteration 2)
-Based on extended gap analysis and verification of implemented items:
+### Implementation Completeness Update (Jan 2026 - Iteration 4)
+Based on comprehensive parallel gap analysis using 3 research agents:
 - **Effect implementation is ~35-40% complete**
 - **Verified complete**: P1.23, P1.26, P1.28, P1.37 (git config, clone pattern, keep-alive)
-- **P1 items: 60** (63 - 3 verified complete)
+- **P1 items: 72** (66 + 6 new from iteration 4)
 - **P2 items: 16**
 - **P3 items: 15**
 - **P4 items: 10**
 - **P5 items: 12**
-- **P6 items: 27** (NEW - dashboard & streaming integration)
-- **Total items: 140** (116 + 27 new - 3 verified complete)
-- Security issues tracked: P1.49 (CRITICAL), P1.62 (cap-drop)
-- Critical fix needed: P6.9 (listByPrefix searches filesystem, not Docker daemon)
+- **P6 items: 27**
+- **Total items: 152**
+- Security issues tracked: P1.49 (CRITICAL prompt injection), P1.62 (cap-drop), P1.68 (heredoc security), P1.71 (internal shell escaping)
+- Critical fix needed: P1.65 (listByPrefix searches filesystem, not Docker daemon)
+
+### Analysis Methodology (Jan 2026 - Iteration 4)
+Three parallel research agents analyzed gaps:
+1. **Spec Coverage Agent**: Compared all specs/* against plan items
+2. **Code Path Agent**: Analyzed src/ for error paths and edge cases
+3. **Legacy Comparison Agent**: Compared ralph.ts working code against Effect implementation
+
+**Areas thoroughly covered**:
+- Networking/firewall configuration (entrypoint.sh handles most)
+- Container lifecycle (create, start, exec patterns documented)
+- Error types and Effect patterns
+- CLI argument parsing
+
+**Areas needing implementation work**:
+- Logging/telemetry subsystem (0% implemented, ~10% of total scope)
+- Service layer tests (0% coverage on live layers)
+- Dashboard event streaming integration
+- Signal handling and graceful shutdown
 
 ### Items Already Implemented in Entrypoint/Firewall
 The following are implemented in docker/entrypoint.sh and docker/init-firewall.sh:
@@ -1359,16 +1416,24 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 3)
+### Priority Summary (Updated Jan 2026 - Iteration 4)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 66 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete, 3 new items) |
+| P1 | Critical Integration | 72 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete, 6 new items) |
 | P2 | Dashboard Integration | 16 items | Core UX features |
 | P3 | Missing Functionality | 15 items | Logging/telemetry subsystem + streaming |
 | P4 | Robustness | 10 items | Production readiness |
 | P5 | Test Coverage | 12 items | Quality assurance (P5.9 duplicate of P5.2) |
 | P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
-| **Total** | | **146 items** | ~35-40% complete |
+| **Total** | | **152 items** | ~35-40% complete |
+
+**Key Findings Iteration 4 (Jan 2026 - Deep Gap Analysis)**:
+- **NEW P1.67**: Docker image existence check before container creation
+- **NEW P1.68**: Heredoc quoted EOF markers for security (prevents shell injection in file writes)
+- **NEW P1.69**: Feature slug sanitization for valid branch names
+- **NEW P1.70**: GitHub token CLI fallback via `gh auth token`
+- **NEW P1.71**: Shell escaping in internal docker exec commands (distinct from P1.49)
+- **NEW P1.72**: Thinking block filtering for dashboard display
 
 **Key Findings Iteration 3 (Jan 2026 Parallel Research)**:
 - **P6.9 CRITICAL**: DockerService.listByPrefix() searches filesystem not Docker daemon - elevated to P1.65
@@ -1590,4 +1655,12 @@ New P1 Items (Jan 2026 - Iteration 3):
 P1.64 GitService Container ───► P1.1 Main Entry Point (context must be correct)
 P1.65 listContainersByPrefix ─► P1.9 Startup Cleanup (CRITICAL - was P6.9)
 P1.66 .claude Write Access ───► P1.55 Volume Mount Paths
+
+New P1 Items (Jan 2026 - Iteration 4):
+P1.67 Docker Image Check ─────► P1.1 Main Entry Point (fail fast)
+P1.68 Heredoc Quoted EOF ─────► P1.12 Features.json Copying, P1.15 Prompt Template
+P1.69 Feature Slug Sanitize ──► P1.11 Branch Name Generation
+P1.70 GitHub Token Fallback ──► P1.6 Environment Validation
+P1.71 Shell Escaping Internal ► P1.21 Container User Switching (command construction)
+P1.72 Thinking Block Filter ──► P6.2 Output vs Event Distinction
 ```
