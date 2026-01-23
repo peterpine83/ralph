@@ -60,6 +60,21 @@
   - If Claude makes changes and pushes: Reset flag
   - Second time all pass without changes: Mark PR ready and exit
 
+### 1.5 Signal Handling (SIGINT/SIGTERM)
+- [ ] Implement graceful shutdown on signals (refs: specs/orchestrator.md:156-167)
+  - First SIGINT/SIGTERM → set `stopping = true`, abort Claude immediately
+  - Second signal → force exit immediately
+  - Always run cleanup in finally block (container removal)
+  - Update dashboard state to reflect shutdown status
+  - Add signal handlers in main.ts before starting orchestration
+
+### 1.6 Environment Variable Validation
+- [ ] Validate required environment on startup (refs: specs/orchestrator.md:197-203)
+  - `CLAUDE_CODE_OAUTH_TOKEN` - Required, error if missing
+  - `GITHUB_TOKEN` - Auto-detect via `gh auth token` if not set
+  - Validate before starting container to fail fast
+  - Clear error messages for missing credentials
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -156,6 +171,45 @@
   - Remove stale containers before starting new session
   - Add to createSession startup sequence
 
+### 4.5 Error Recovery with Retry Logic
+- [ ] Implement retry with exponential backoff for transient failures
+  - Docker operations: network errors, daemon restarts
+  - Git operations: remote connectivity, lock conflicts
+  - Use Effect.retry with Schedule.exponential
+  - Cap retries at 3 attempts with jitter
+
+---
+
+## Priority 5: Test Coverage Gaps
+
+### 5.1 Service Layer Tests
+- [ ] Add unit tests for DockerLive methods (refs: src/layers/DockerLive.ts)
+  - Test create(), start(), remove(), inspect() with real Docker or testcontainers
+  - Test exec() and execStream() output parsing
+  - Test readFile() and writeFile() round-trip
+  - Test copyToContainer() once implemented
+
+### 5.2 Session Creation Tests
+- [ ] Add tests for createSession() function (refs: src/program.ts:23-200)
+  - Test container creation and startup sequence
+  - Test git clone and repository setup
+  - Test branch checkout logic (resume vs new)
+  - Test firewall ready detection (once implemented)
+
+### 5.3 Dashboard Server Tests
+- [ ] Add tests for dashboard HTTP endpoints (refs: src/server.ts)
+  - Test SSE client connection/disconnection
+  - Test POST /pause, /resume, /step-mode, /stop
+  - Test GET/PUT /prompt template operations
+  - Test state broadcasting to multiple clients
+
+### 5.4 Integration Test Suite
+- [ ] Add end-to-end orchestration tests
+  - Full session lifecycle: create → iterate → cleanup
+  - Circuit breaker triggering after 3 no-change iterations
+  - Feature completion detection
+  - Signal handling (if practical to test)
+
 ---
 
 ## Discoveries
@@ -188,6 +242,17 @@
 - Effect-based: `/workspace/src/layers/DashboardLive.ts` - Effect.Ref, scoped lifecycle
 - Need to consolidate to single implementation
 
+### Branch Naming Logic Exists
+- `generateContainerName()` in `/workspace/src/container.ts` generates timestamps
+- Pattern available but not wired to main.ts branch creation
+- Container naming uses `ralph-session-{timestamp}` pattern
+
+### Missing Test Coverage Areas
+- 0% coverage on service layer implementations (DockerLive, ClaudeLive, GitLive)
+- 0% coverage on createSession() function
+- 0% coverage on dashboard server endpoints
+- No integration tests for full orchestration lifecycle
+
 ---
 
 ## Blockers
@@ -219,3 +284,12 @@ Per specs/features.md, Claude must run full CI suite (typecheck, tests, build) b
 - Phase 3: Activity log improvements (expand, highlight, prompt display)
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
+
+### Priority Summary
+| Priority | Category | Items | Status |
+|----------|----------|-------|--------|
+| P1 | Critical Integration | 6 items | Blocking basic functionality |
+| P2 | Dashboard Integration | 4 items | Core UX features |
+| P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
+| P4 | Robustness | 5 items | Production readiness |
+| P5 | Test Coverage | 4 items | Quality assurance |
