@@ -257,6 +257,7 @@ async function runClaudeInContainer(
       const proc = Bun.spawn([
         "docker", "exec", "-u", "node", containerName,
         "claude", "-p", "--dangerously-skip-permissions",
+        "--model", "claude-opus-4-5-20251101",
         "--verbose", "--output-format", "stream-json",
         prompt
       ], { signal, stdout: "pipe", stderr: "pipe" })
@@ -324,7 +325,9 @@ async function runClaudeInContainer(
       // Original behavior: inherit stdout/stderr
       const proc = Bun.spawn([
         "docker", "exec", "-u", "node", containerName,
-        "claude", "-p", "--dangerously-skip-permissions", prompt
+        "claude", "-p", "--dangerously-skip-permissions",
+        "--model", "claude-opus-4-5-20251101",
+        prompt
       ], { signal, stdout: "inherit", stderr: "inherit" })
 
       await proc.exited

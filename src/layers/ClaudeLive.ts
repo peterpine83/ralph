@@ -23,6 +23,9 @@ export const makeClaudeLive = () =>
             // Build claude CLI command with flags
             const args: string[] = ["claude", "-p"]
 
+            // Always use Opus model
+            args.push("--model", "claude-opus-4-5-20251101")
+
             if (options.flags?.dangerouslySkipPermissions) {
               args.push("--dangerously-skip-permissions")
             }
@@ -68,6 +71,9 @@ export const makeClaudeLive = () =>
             Effect.gen(function* () {
               // Build claude CLI command with flags, forcing stream-json output
               const args: string[] = ["claude", "-p"]
+
+              // Always use Opus model
+              args.push("--model", "claude-opus-4-5-20251101")
 
               if (options.flags?.dangerouslySkipPermissions) {
                 args.push("--dangerously-skip-permissions")
