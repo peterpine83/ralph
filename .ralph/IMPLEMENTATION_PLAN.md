@@ -4439,4 +4439,346 @@ Running totals:
 - P5 items: 61 (was 55)
 - P6 items: 55 (was 51)
 - Grand total: 495 items (was 446)
+
+---
+
+## Iteration 18 Research Findings (Jan 2026)
+
+### New P1 Items (Critical Integration Gaps)
+
+P1.215 Per-Feature CI Verification Enforcement ► specs/orchestrator.md:103-124
+  - Spec: Claude MUST run full CI suite after EVERY feature
+  - Gap: Orchestrator relies entirely on prompt instructions, no enforcement
+  - Risk: Features marked `passes: true` without CI actually passing
+  - Missing: Validation that typecheck/test/build/verify_command ran and passed
+
+P1.216 Final Verification Two-Pass Logic ► specs/orchestrator.md:125-138
+  - Gap: `finalVerificationDone` flag tracking not implemented
+  - Missing: First pass runs verification, second pass marks PR ready
+  - Missing: Reset flag if Claude makes changes during final verification
+
+P1.217 .packages GitHub IP Range ► specs/networking.md:61, docker/init-firewall.sh:76
+  - Gap: init-firewall.sh only includes `.web + .api + .git`
+  - Missing: `.packages` field for GitHub Packages registry
+  - Fix: `jq -r '(.web + .api + .git + .packages)[]'`
+
+P1.218 *.githubusercontent.com Domain Allowlist ► specs/networking.md:38
+  - Gap: Not in RALPH_ALLOWED_DOMAINS array
+  - Impact: Blocks raw file fetching from GitHub repos
+  - Fix: Add domain resolution for githubusercontent.com subdomains
+
+P1.219 tool_result ContentBlock Type Missing ► specs/claude-integration.md:73, types.ts:95-102
+  - Gap: types.ts only includes text, tool_use, thinking
+  - Missing: `| { type: "tool_result"; tool_use_id: string; content: string }`
+  - Impact: TypeScript won't recognize tool_result blocks from Claude stream
+
+P1.220 Layer.scoped Lifecycle Not Implemented ► specs/dashboard.md:151-163
+  - Gap: DashboardLive.ts uses Layer.scoped but doesn't implement cleanup
+  - Missing: Resource cleanup on scope end (close SSE connections, stop server)
+  - Missing: Finalization block in scoped layer
+
+P1.221 Raw JSONL Event Passthrough ► specs/logging-telemetry.md:61-69
+  - Gap: No LoggingService implementation exists
+  - Missing: Write Claude events to JSONL without modification
+  - Missing: Append-only file operations for concurrent access safety
+
+P1.222 iteration_start Event Type ► specs/logging-telemetry.md:72-77
+  - Gap: types.ts doesn't define iteration_start event type
+  - Missing: `{"type":"iteration_start","iteration":N,"timestamp":"..."}`
+  - Purpose: Allows dashboard to load events for specific iteration
+
+P1.223 Session File Naming Convention ► specs/logging-telemetry.md:63
+  - Gap: No logging file creation logic exists
+  - Missing: Path `.ralph/sessions/{containerName}.jsonl`
+  - Missing: Directory creation before file write
+
+P1.224 /logs/:iteration Endpoint ► specs/logging-telemetry.md:42, 282-284
+  - Gap: server.ts doesn't implement this endpoint
+  - Missing: Scan JSONL for iteration boundaries, return subset
+  - Response: text/plain with raw JSONL content
+
+P1.225 /iterations Endpoint ► specs/logging-telemetry.md:273-280
+  - Gap: Not implemented in server.ts
+  - Missing: Parse JSONL to extract iteration list and token counts
+  - Response: `{ iterations: IterationMetrics[], currentIteration: number }`
+
+P1.226 /rerun Endpoint for Prompt Editing ► specs/logging-telemetry.md:244-255
+  - Gap: Not implemented
+  - Missing: POST endpoint accepts modified prompt, starts new iteration
+  - Behavior: Appends to current branch, doesn't create new branch
+
+P1.227 IterationMetrics Type Definition ► specs/logging-telemetry.md:92-101
+  - Gap: types.ts doesn't define IterationMetrics
+  - Fields: iteration, status, inputTokens, outputTokens, totalTokens, contextPercent, duration
+  - Calculation: `contextPercent = (totalTokens / 200000) * 100`
+
+P1.228 Prompt Display at Iteration Start ► specs/logging-telemetry.md:170-180
+  - Gap: Dashboard doesn't render prompt content
+  - Missing: Extract prompt from iteration start, display in collapsible block
+  - Format: Monospace with syntax highlighting
+
+P1.229 server.ts Has No Tests ► src/server.ts:1-301
+  - Gap: 301 lines of dashboard server code completely untested
+  - Missing: Tests for broadcast, updateState, updateIteration, updateFeatures
+  - Missing: Tests for SSE stream creation, HTTP endpoints, static file serving
+  - Priority: HIGH - Critical for dashboard functionality
+
+P1.230 createSession() Untested ► src/program.ts:23-200
+  - Gap: Session initialization logic has no tests
+  - Missing: Tests for container creation, git clone, firewall wait, git config
+  - Note: mainLoop and runIteration are tested, but session setup is not
+
+P1.231 Layer Implementations Untested ► src/layers/*Live.ts
+  - Gap: DockerLive, ClaudeLive, GitLive, ConfigLive have no tests
+  - Missing: Docker command building, Claude CLI args, git operations
+  - Note: Test layers exist as mocks but don't test real implementations
+
+P1.232 FeatureEvent Never Handled in Dashboard ► dashboard/src/App.tsx:26-44
+  - Gap: handleEvent handles state, iteration, features, claude_event, output
+  - Missing: FeatureEvent type with id and status fields not processed
+  - Spec: dashboard.md:100-103 defines FeatureEvent interface
+
+P1.233 useSSE Reconnection Bug ► dashboard/src/hooks/useSSE.ts:26-32
+  - Gap: Error handler creates new EventSource but doesn't attach handlers
+  - Bug: New EventSource at line 30 has no onmessage/onerror handlers
+  - Impact: Reconnected instances won't process events
+
+P1.234 useSSE Cleanup Memory Leak ► dashboard/src/hooks/useSSE.ts:29-36
+  - Gap: Reconnection timeout not cleaned up on unmount
+  - Bug: 1-second timeout fires after component unmounts
+  - Fix: Store timeout in ref, clear in useEffect cleanup
+
+### New P2 Items (Type Safety & Data Integrity)
+
+P2.83 ClaudeResultEvent.subtype Missing "interrupted" ► types.ts:117
+  - Spec: subtype is success | error | interrupted
+  - Gap: Only success | error defined
+  - Missing: "interrupted" for timeout/signal cases
+
+P2.84 mcp_servers Type Inconsistency ► specs/claude-integration.md:48, types.ts:86
+  - Spec: mcp_servers is string array
+  - Implementation: Record<string, unknown>[]
+  - Needs: Verify actual Claude output format and reconcile
+
+P2.85 StateEvent Partial State ► specs/dashboard.md:90-93, types.ts:27-35
+  - Gap: StateEvent.data only includes subset of DashboardState fields
+  - Missing: iteration, maxIterations, features, promptTemplate
+
+P2.86 FeaturesEvent Structure Mismatch ► specs/dashboard.md:111-113, types.ts:65
+  - Spec: FeaturesEvent.data is Feature[]
+  - Implementation: Wraps in { features: Feature[] }
+  - Creates: Unnecessary data.features access pattern
+
+P2.87 DashboardError Not in errors/index.ts ► services/Dashboard.ts:4-8
+  - Gap: Service interface defines DashboardError
+  - Missing: Data.TaggedError class in errors module
+  - Impact: Can't use with Effect.catchTag pattern
+
+P2.88 ValidationError Not Used ► errors/index.ts
+  - Gap: Defined but never thrown anywhere
+  - Should: Use for features.json validation, CLI arg validation
+
+P2.89 Error Type Field Inconsistencies ► services/*.ts vs errors/index.ts
+  - DockerError: interface has `message`, class has `command`
+  - ClaudeError: interface has `message`, class has `exitCode`
+  - GitError: interface has `message`, class has `operation`
+  - TimeoutError: interface has `timeoutMs`, class has `durationMs`
+
+P2.90 Dashboard Types Missing Backend Fields ► dashboard/src/types.ts:10-24
+  - Gap: Frontend StateData doesn't match backend DashboardState
+  - Missing: iteration, maxIterations, features, promptTemplate fields
+  - Creates: Synchronization issues where backend exposes more state
+
+P2.91 Control API Error Handling Missing ► dashboard/src/hooks/useSSE.ts:39-58
+  - Gap: pause, resume, setStepMode, stop fetch calls have no error handling
+  - Missing: try-catch, error state, user feedback mechanism
+
+### New P3 Items (Robustness & Edge Cases)
+
+P3.44 Firewall Self-Verification Incomplete ► docker/init-firewall.sh:143-164
+  - Gap: Only tests GitHub and Anthropic domains
+  - Missing: Verify registry.npmjs.org, sentry.io, statsig domains
+  - Risk: Firewall may silently fail for some domains
+
+P3.45 Firewall DNS Resolution Retry ► docker/init-firewall.sh:92-108
+  - Gap: WARNING on DNS failure but continues
+  - Missing: Retry logic for transient DNS failures
+  - Consider: Fail hard for critical domains (api.anthropic.com)
+
+P3.46 GitHub Meta API Validation ► docker/init-firewall.sh:55-76
+  - Gap: Doesn't validate .packages field exists
+  - Missing: Validate response is valid JSON before jq parse
+  - Missing: Retry on API failure
+
+P3.47 CIDR Range Validation ► docker/init-firewall.sh:69-76
+  - Gap: Doesn't validate CIDR values are sensible
+  - Risk: Overly broad ranges (0.0.0.0/0) could bypass firewall
+  - Missing: Reject suspiciously large ranges
+
+P3.48 iptables Rule Ordering Race ► docker/init-firewall.sh:39-137
+  - Gap: Sets default DROP then adds ACCEPT rules
+  - Risk: Brief window where all traffic blocked during init
+  - Should: Set ACCEPT rules first, THEN set default DROP
+
+P3.49 Docker DNS Rule Restoration Validation ► docker/init-firewall.sh:17-37
+  - Gap: No validation that DNS restoration succeeded
+  - Missing: Verify DNS resolution works after restoration
+
+P3.50 ipset Destroy Error Handling ► docker/init-firewall.sh:27
+  - Gap: `|| true` silently ignores all errors
+  - Risk: If ipset in use, destroy fails, create fails
+
+P3.51 Entrypoint SSH Key Type Detection ► docker/entrypoint.sh:22-28
+  - Gap: Only handles id_rsa OR id_ed25519
+  - Missing: Other key types (ecdsa, dsa)
+  - Missing: Fallback to ssh-add -l detection
+
+P3.52 Workspace Permission Fix Failure ► docker/entrypoint.sh:12
+  - Gap: `|| true` silently ignores permission errors
+  - Risk: Container starts but Claude can't write files
+  - Should: Verify at least /workspace root is writable
+
+P3.53 Git Config Conditional Inconsistency ► docker/entrypoint.sh:23-28
+  - Gap: SSH conditional but credential helper unconditional
+  - Should: Only configure credential helper if GITHUB_TOKEN exists
+
+P3.54 Thinking Block Type Guidance ► types.ts:96, specs/logging-telemetry.md:166-168
+  - Gap: types.ts includes thinking but no rendering guidance
+  - Missing: Document that thinking blocks should not be rendered
+  - Dashboard: Should filter out thinking content blocks
+
+P3.55 JSON.parse Error in getRemainingFeatures ► container.ts:42
+  - Gap: Raw JSON.parse without try-catch
+  - Impact: Throws on invalid JSON instead of returning error
+  - Should: Return Effect with ValidationError
+
+### New P4 Items (Polish & Documentation)
+
+P4.41 Model Hardcoded Undocumented ► ClaudeLive.ts:27, specs/claude-integration.md:17-24
+  - Gap: --model claude-opus-4-5-20251101 not in spec flag list
+  - Should: Document flag or make configurable
+
+P4.42 Verbose Flag Unexplained ► specs/claude-integration.md:23
+  - Gap: Spec doesn't explain what verbose output includes
+  - Missing: Document additional logging behavior
+
+P4.43 Prompt Size Limits Undocumented ► specs/claude-integration.md:26-33
+  - Gap: No guidance on size threshold for file vs CLI
+  - Missing: Document max command-line prompt size (shell ARG_MAX)
+
+P4.44 Tool Capabilities Incomplete ► specs/claude-integration.md:176-189
+  - Gap: "Claude can" list not exhaustive
+  - Missing: MCP server tools if enabled
+  - Missing: File size limits, command timeout limits
+
+P4.45 Cost Tracking Format Unspecified ► specs/claude-integration.md:211-223
+  - Gap: No specification of decimal precision
+  - Missing: Currency format, total cost aggregation logic
+
+P4.46 num_turns Metric Undefined ► specs/claude-integration.md:84
+  - Gap: No definition of what constitutes a "turn"
+  - Missing: Is it assistant+user pairs? Total messages?
+
+P4.47 IterationProgress Component Missing ► dashboard/
+  - Spec: dashboard.md:223 lists IterationProgress component
+  - Gap: Currently hardcoded inline in App.tsx:62-64
+  - Should: Extract to dedicated component
+
+P4.48 Feature Description No Expansion ► dashboard/src/components/FeatureList.tsx:80-86
+  - Gap: Descriptions truncated with ellipsis, no way to expand
+  - Unlike: ActivityLog items can be clicked to expand
+
+P4.49 verify_command Not Displayed ► FeatureList.tsx:7-38
+  - Gap: Feature type has verify_command but UI only shows id/description
+  - Missing: Show what verification command runs
+
+P4.50 Scroll Button Covers Content ► ActivityLog.tsx:172-184, 447-458
+  - Gap: position:absolute bottom:12px overlays last log item
+  - Impact: Content unreadable until user scrolls
+
+### New P5 Items (Consistency & Naming)
+
+P5.62 ClaudeEventMessage vs claude_event Naming ► dashboard.md:115-119
+  - Gap: Type named ClaudeEventMessage, event.type is claude_event
+  - Should: Rename type or event.type for consistency
+
+P5.63 DashboardEvent Union Formatting ► types.ts:70
+  - Gap: All types on one line (hard to read)
+  - Style: Should be multi-line union for clarity
+
+P5.64 Feature Status vs Passes Inconsistency ► types.ts:50
+  - Gap: Feature has passes:boolean, FeatureEvent has status:string
+  - Inconsistency: Different representations of same concept
+
+P5.65 Template File Naming Convention ► templates/
+  - Gap: No naming convention documented
+  - Files: ralph-instructions.md, ralph-plan-mode.md
+
+P5.66 Unused Terminal Component ► dashboard/src/components/Terminal.tsx
+  - Gap: 93-line xterm implementation never imported
+  - Status: Dead code, CSS still loaded in main.tsx:3
+
+### New P6 Items (Minor Deviations)
+
+P6.56 parseNDJSONWithFallback Unused ► ndjson.ts:41-60
+  - Gap: Exported but never called
+  - Status: Available for future use, not a bug
+
+P6.57 fromReadableStream Unused ► ndjson.ts:68-79
+  - Gap: Converts WHATWG ReadableStream, never called
+
+P6.58 collectAll Unused ► ndjson.ts:86-89
+  - Gap: Collects stream to array, never called
+
+P6.59 forEach Unused ► ndjson.ts:97-101
+  - Gap: Consumes stream with callback, never called
+
+P6.60 parseInt NaN Not Validated ► args.ts:36,43
+  - Gap: parseInt can return NaN, not validated
+  - Note: Test verifies NaN result but doesn't reject it
+
+P6.61 No Connection Status Indicator ► dashboard/src/hooks/useSSE.ts
+  - Gap: No visual feedback when SSE connection fails/reconnects
+
+P6.62 No Loading State for Initial Connection ► dashboard/src/App.tsx
+  - Gap: Renders empty state while SSE connecting
+  - Shows: "No features loaded" for both loading and empty
+
+P6.63 No Keyboard Shortcuts ► dashboard/
+  - Gap: No shortcuts for pause, resume, stop
+  - All: Interactions require mouse clicks
+
+---
+
+Iteration 18 Dependency Graph Additions:
+P1.215 CI Verification ────────────► Trust/correctness of feature completion
+P1.216 Final Verification ─────────► P1.4 finalVerificationDone (extends)
+P1.217-218 Network Domains ────────► P2.82 GitHub .packages (extends)
+P1.219 tool_result Type ───────────► Type safety for Claude stream parsing
+P1.220-228 Logging/Telemetry ──────► New subsystem, no existing implementation
+P1.229-231 Test Gaps ──────────────► Quality/reliability improvements
+P1.232-234 Dashboard Bugs ─────────► SSE reconnection correctness
+P2.83-91 Type Mismatches ──────────► Type safety improvements
+P3.44-55 Robustness ───────────────► Firewall/entrypoint edge cases
+P4.41-50 Polish ───────────────────► Documentation and UX
+P5.62-66 Consistency ──────────────► Naming and code organization
+P6.56-63 Minor ────────────────────► Unused code, informational
+
+Summary (Iteration 18):
+- 20 new P1 items (P1.215-P1.234) - Critical gaps
+- 9 new P2 items (P2.83-P2.91) - Type safety
+- 12 new P3 items (P3.44-P3.55) - Robustness
+- 10 new P4 items (P4.41-P4.50) - Polish
+- 5 new P5 items (P5.62-P5.66) - Consistency
+- 8 new P6 items (P6.56-P6.63) - Minor
+- Total new items: 64
+
+Running totals:
+- P1 items: 234 (was 214)
+- P2 items: 91 (was 82)
+- P3 items: 55 (was 43)
+- P4 items: 50 (was 40)
+- P5 items: 66 (was 61)
+- P6 items: 63 (was 55)
+- Grand total: 559 items (was 495)
 ```
