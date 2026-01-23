@@ -5758,3 +5758,261 @@ Running totals:
 - P5 items: 77 (was 75)
 - P6 items: 70 (unchanged)
 - Grand total: 681 items (was 658)
+
+---
+
+## Iteration 24 Research (Jan 2026)
+
+### New P1 Items (Critical Gaps)
+
+P1.276 GitHub .packages IP Range Missing ► docker/init-firewall.sh:76
+  - Gap: Spec includes `.packages` in GitHub IP range extraction
+  - Implementation at line 76 only uses `.web + .api + .git`
+  - Spec: `jq -r '(.web + .api + .git + .packages)[]'`
+  - Code: `jq -r '(.web + .api + .git)[]'`
+  - Impact: GitHub packages/container registry may be blocked
+  - Fix: Add `.packages` to jq extraction
+
+P1.277 Loopback Rules Added Before Default Policies ► docker/init-firewall.sh:48-50 vs 124-127
+  - Gap: Spec shows default policies set as step 5, loopback as step 6
+  - Implementation adds loopback at lines 48-50, default policies at 124-127
+  - This means rules processed before default DROP policy exists
+  - Impact: Ordering inconsistency may cause race conditions during init
+  - Fix: Restructure to match spec ordering
+
+P1.278 Host IP Detection Failure Leaves Partial Firewall ► docker/init-firewall.sh:111-114
+  - Gap: If HOST_IP detection fails, script exits immediately
+  - NAT rules already flushed (line 41) but no firewall rules in place
+  - Impact: Container left with no firewall protection on failure
+  - Fix: Add rollback/cleanup on error path
+
+P1.279 FeatureEvent Never Sent to Dashboard ► src/server.ts, src/types.ts:46-52
+  - Gap: FeatureEvent defined in types with status "pending"|"working"|"passed"
+  - Never instantiated or broadcast by server.ts or DashboardLive.ts
+  - Only FeaturesEvent (full array) is used
+  - Impact: No granular feature status updates to dashboard
+  - Fix: Send individual FeatureEvent when feature status changes
+
+P1.280 OutputEvent Data Structure Mismatch ► src/types.ts:38-44 vs specs/dashboard.md:95-98
+  - Gap: Spec shows OutputEvent.data as `string`
+  - Implementation has `{ text: string, timestamp: number }`
+  - Type mismatch between spec and implementation
+  - Fix: Align type with spec or update spec
+
+P1.281 IterationEvent Has Extra Field ► src/types.ts:54-60 vs specs/dashboard.md:105-108
+  - Gap: Implementation includes `remaining` field not in spec
+  - Spec: `{ current: number; max: number }`
+  - Code: `{ current: number; max: number; remaining: number }`
+  - Impact: Dashboard receiving unexpected field
+  - Fix: Document as extension or remove field
+
+P1.282 DashboardLive Initial State Missing Events ► src/layers/DashboardLive.ts:136-140
+  - Gap: Only sends state event on SSE connection
+  - server.ts sends state, iteration, AND features (lines 137-167)
+  - Impact: DashboardLive clients don't receive full initial state
+  - Fix: Send iteration and features events after state
+
+P1.283 Orchestrator Never Uses DashboardService ► src/program.ts
+  - Gap: program.ts has no DashboardService imports or yield* calls
+  - Dashboard receives no updates from Effect-based orchestrator
+  - Related to P1.149 but specifically about complete absence of integration
+  - Fix: Add DashboardService calls throughout mainLoop
+
+P1.284 Circuit Breaker Logic Has Unreachable Code ► src/program.ts:297, 324-330
+  - Gap: Loop condition `noChangeCount < 3` prevents count from reaching 3
+  - Final check `finalState.noChangeCount >= 3` can never be true
+  - Impact: Circuit breaker never triggers, dead code at lines 324-330
+  - Fix: Change to `<=` or remove redundant check
+
+P1.285 DashboardLive Server Never Started ► src/main.ts
+  - Gap: DashboardLive.start() method exists but never called
+  - No code invokes dashboard server startup
+  - Related to P2.2 but at critical level - complete non-functionality
+  - Fix: Add dashboard startup to main.ts initialization
+
+P1.286 ClaudeResultEvent Missing "interrupted" Subtype ► src/types.ts:117
+  - Gap: Spec shows subtype: "success" | "error" | "interrupted"
+  - Implementation only has "success" | "error" | "timeout"
+  - Impact: Cannot distinguish interrupted vs errored Claude sessions
+  - Fix: Add "interrupted" to subtype union
+
+P1.287 Invalid JSON Aborts Stream Instead of Skipping ► src/streams/ndjson.ts:22-31
+  - Gap: Spec requires skipping invalid JSON lines and continuing
+  - Implementation produces StreamError, aborting entire stream
+  - Impact: Single malformed line kills event processing
+  - Fix: Map parse errors to Effect.succeed(null) and filter nulls
+
+P1.288 Empty Features Array Not Validated ► ralph.ts:378-379
+  - Gap: Spec says "Orchestrator exits (nothing to do)" for empty array
+  - Implementation parses but doesn't check array length
+  - Container creation proceeds even with no features
+  - Fix: Add `if (features.length === 0) exit` after parse
+
+### New P2 Items (Architecture)
+
+P2.115 DockerService.listByPrefix Signature Incorrect ► src/services/Docker.ts:120-123
+  - Gap: Method has `(containerName: string, prefix: string)` signature
+  - Purpose is to list containers matching prefix (for cleanup)
+  - First param doesn't make sense - should be `(prefix: string)`
+  - Impact: Cannot implement cleanupStaleContainers correctly
+  - Fix: Change signature to match spec usage pattern
+
+P2.116 Two Parallel Dashboard Implementations ► src/server.ts, src/layers/DashboardLive.ts
+  - Gap: Both files implement dashboard server independently
+  - server.ts: Global mutable state, complete endpoints
+  - DashboardLive.ts: Effect-based, SSE only, missing control endpoints
+  - Impact: Maintenance burden, inconsistent behavior
+  - Fix: Consolidate to single DashboardLive implementation
+
+P2.117 Prompt File Pattern Not in Effect Implementation ► src/program.ts:239-251
+  - Gap: ralph.ts writes prompt to .ralph-prompt.md, invokes Claude with "Read..."
+  - program.ts passes prompt directly as CLI argument
+  - Spec requires file-based prompt for complex prompts
+  - Fix: Implement two-step prompt workflow in program.ts
+
+P2.118 Git Config Duplication Across Entrypoint and Program ► docker/entrypoint.sh:30-33, src/program.ts:122-167
+  - Gap: Git configuration performed in TWO places
+  - Entrypoint configures credential.helper and SSH
+  - program.ts also configures all three settings via docker.exec
+  - Impact: Redundant execution, potential inconsistency
+  - Fix: Choose one location (prefer entrypoint) and remove other
+
+P2.119 safe.directory Missing from Entrypoint ► docker/entrypoint.sh vs specs/container.md:211
+  - Gap: Spec shows git safe.directory should be in entrypoint.sh
+  - Only configured later via docker.exec in program.ts
+  - Impact: Git operations may fail before program.ts runs
+  - Fix: Add `git config --system safe.directory /workspace` to entrypoint.sh
+
+### New P3 Items (Robustness)
+
+P3.81 Firewall Test Cases Incomplete ► docker/init-firewall.sh:143-164
+  - Gap: Spec lists tests for webhook.site, httpbin.org, registry.npmjs.org
+  - Implementation only tests example.com (blocked) and GitHub/Anthropic (allowed)
+  - Impact: Incomplete verification of firewall configuration
+  - Fix: Add all spec-defined test cases
+
+P3.82 No IPv6 Firewall Rules ► docker/init-firewall.sh
+  - Gap: Only IPv4 iptables rules, no ip6tables handling
+  - Services with IPv6 endpoints would bypass firewall
+  - Impact: Potential security gap for IPv6-enabled services
+  - Fix: Add ip6tables rules or block all IPv6 traffic
+
+P3.83 No CAP_NET_ADMIN Verification ► docker/init-firewall.sh
+  - Gap: Firewall requires NET_ADMIN capability
+  - No pre-flight check that capability is available
+  - Impact: Cryptic iptables errors if capability missing
+  - Fix: Add capability check before firewall commands
+
+P3.84 Cost Aggregation Across Iterations Missing ► src/program.ts
+  - Gap: Spec mentions aggregating cost across iterations
+  - No implementation to sum ClaudeResultEvent.cost_usd
+  - Impact: No session-total cost tracking
+  - Fix: Add running cost total to iteration state
+
+P3.85 No Retry Logic for DockerError ► src/program.ts:214-266
+  - Gap: Spec defines DockerError as recoverable with retry
+  - No retry with backoff for Docker failures
+  - Impact: Transient Docker failures abort session
+  - Fix: Add Effect.retry with exponential backoff for DockerError
+
+P3.86 No Continue Logic for GitError ► src/program.ts
+  - Gap: Spec says GitError should log and continue
+  - No specific handling for git failures
+  - Impact: Git failures may abort instead of continuing
+  - Fix: Add catchTag for GitError with continue behavior
+
+### New P4 Items (Polish)
+
+P4.66 Dashboard Feature Sidebar vs Iteration Sidebar ► dashboard/src/App.tsx:84-100
+  - Gap: Spec shows two-panel layout with iteration sidebar
+  - Implementation only has Features sidebar
+  - Impact: No iteration navigation UI
+  - Fix: Add IterationSidebar component alongside Features
+
+P4.67 ActivityLog Ignores OutputEvent ► dashboard/src/App.tsx:40-42
+  - Gap: Comment marks OutputEvent as "Legacy" and ignores it
+  - Spec still defines OutputEvent as current API
+  - server.ts still sends OutputEvent
+  - Impact: Spec-defined events not displayed
+  - Fix: Handle OutputEvent or update spec
+
+P4.68 No Feature Name in Iteration Display ► dashboard/src/App.tsx:62-63
+  - Gap: Spec says "Iteration N (or feature name if available)"
+  - Only shows numeric iteration count
+  - Impact: Less context for user about current work
+  - Fix: Display feature name when known
+
+### New P5 Items (Consistency)
+
+P5.78 REJECT ICMP Type Mismatch ► docker/init-firewall.sh:137 vs specs/networking.md:97
+  - Gap: Spec uses `icmp-port-unreachable`
+  - Implementation uses `icmp-admin-prohibited`
+  - Impact: Different rejection behavior than spec
+  - Fix: Change to match spec for consistency
+
+P5.79 ClaudeEventMessage Type Name Inconsistency ► src/types.ts:133 vs specs/dashboard.md:116
+  - Gap: Spec says type should be "claude"
+  - Implementation uses "claude_event"
+  - Impact: Type naming inconsistency
+  - Fix: Align type name with spec
+
+P5.80 Container Name Uses session- Prefix ► src/container.ts:20 vs specs/container.md:64
+  - Gap: Spec shows `ralph-{timestamp}` pattern
+  - Implementation generates `ralph-session-${id}`
+  - Impact: Name format differs from spec examples
+  - Fix: Document as intentional extension or align with spec
+
+### New P6 Items (Minor)
+
+P6.71 Entrypoint.sh Checks Wrong SSH Directory ► docker/entrypoint.sh:15
+  - Gap: Checks `/home/node/.ssh` but volume mounts to `/root/.ssh`
+  - Overlaps with P1.139 but specific to directory check location
+  - Fix: Change check to `/root/.ssh` or change mount point
+
+P6.72 Entrypoint Workspace Chown Not in Spec ► docker/entrypoint.sh:12
+  - Gap: Entrypoint has `chown -R node:node /workspace`
+  - Not documented in spec's entrypoint section (lines 192-217)
+  - Impact: Undocumented behavior
+  - Fix: Add to spec or remove with explanation
+
+P6.73 Default CMD in Dockerfile Not in Spec ► docker/Dockerfile.base:78
+  - Gap: Dockerfile has `CMD ["claude", "--version"]`
+  - Spec shows only ENTRYPOINT, no CMD
+  - Impact: Minor deviation from spec
+  - Fix: Document or remove
+
+---
+
+Iteration 24 Dependency Graph Additions:
+P1.276 GitHub .packages ─────────────────► Firewall completeness
+P1.277-278 Firewall Ordering ────────────► Firewall reliability
+P1.279-282 Dashboard Events ─────────────► P2.2 Dashboard integration
+P1.283 Orchestrator-Dashboard ───────────► P1.149 (extends)
+P1.284 Circuit Breaker ──────────────────► Iteration control correctness
+P1.285 Dashboard Startup ────────────────► P2.2 (critical blocker)
+P1.286-287 Claude Event Handling ────────► Stream processing correctness
+P1.288 Features Validation ──────────────► P1.47 (extends)
+
+P2.115-119 Architecture ─────────────────► Code organization
+P3.81-86 Robustness ─────────────────────► Error handling and testing
+P4.66-68 Dashboard Polish ───────────────► UX improvements
+P5.78-80 Consistency ────────────────────► Spec alignment
+P6.71-73 Minor ──────────────────────────► Documentation gaps
+
+Summary (Iteration 24):
+- 13 new P1 items (P1.276-P1.288) - Firewall, Dashboard, Event handling
+- 5 new P2 items (P2.115-P2.119) - Architecture and patterns
+- 6 new P3 items (P3.81-P3.86) - Robustness and testing
+- 3 new P4 items (P4.66-P4.68) - Dashboard polish
+- 3 new P5 items (P5.78-P5.80) - Spec consistency
+- 3 new P6 items (P6.71-P6.73) - Documentation
+- Total new items: 33
+
+Running totals:
+- P1 items: 288 (was 275)
+- P2 items: 119 (was 114)
+- P3 items: 86 (was 80)
+- P4 items: 68 (was 65)
+- P5 items: 80 (was 77)
+- P6 items: 73 (was 70)
+- Grand total: 714 items (was 681)
