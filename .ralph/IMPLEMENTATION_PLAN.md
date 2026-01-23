@@ -5120,3 +5120,116 @@ Running totals:
 - P5 items: 70 (was 68)
 - P6 items: 68 (was 66)
 - Grand total: 606 items (was 598)
+
+---
+
+## Iteration 21 Research (Jan 2026)
+
+### New P2 Items (Type Safety & State Issues)
+
+P2.102 Dashboard Type Definitions Diverge Between Server and Client ► src/types.ts vs dashboard/src/types.ts
+  - Gap: Two separate type definitions that should be identical
+  - Server `DashboardState` (src/types.ts:10-22): Has `iteration`, `maxIterations` fields
+  - Client `StateData` (dashboard/src/types.ts:10-18): Excludes these fields, uses separate `IterationData`
+  - Impact: Manual sync required, potential runtime mismatches
+  - Fix: Create shared types package or generate client types from server
+
+P2.103 StateEvent Missing Fields From DashboardState ► src/server.ts:50-63, src/types.ts:25-36
+  - Gap: `broadcastState()` creates partial StateEvent with only 7 of 11 fields
+  - Current: Sends paused, running, stepMode, stopping, claudeRunning, containerName, branch
+  - Missing: iteration, maxIterations, features, promptTemplate
+  - Impact: Dashboard can't display full state from state events
+  - Fix: Either broadcast all fields or document which fields require separate events
+
+P2.104 Mode Validation Silently Ignores Invalid Values ► src/args.ts:45-47
+  - Gap: Invalid mode values are silently ignored, defaults to "build"
+  - Current: `if (["plan", "build"].includes(nextArg))` with no else clause
+  - Impact: User typos go undetected, wrong mode runs silently
+  - Fix: Add warning or error for invalid mode values
+
+### New P3 Items (Robustness)
+
+P3.63 SSE Heartbeat Missing - Proxy Timeout Risk ► src/server.ts:128-173, src/layers/DashboardLive.ts:111-179
+  - Gap: No periodic SSE heartbeat to keep connection alive
+  - Current: Only sends events when state changes
+  - Impact: Long idle periods trigger proxy timeouts (typically 60s)
+  - Fix: Send `:ping` comment every 30 seconds to keep connection alive
+
+P3.64 SSE Reconnect Doesn't Re-Initialize State ► dashboard/src/hooks/useSSE.ts:26-32
+  - Gap: Error handler reconnects EventSource but doesn't request current state
+  - Current: Creates new EventSource in timeout, waits for next event
+  - Impact: Dashboard shows stale state after network hiccup until server event arrives
+  - Fix: Request /state endpoint on reconnect or have server send full state on new connection
+
+P3.65 Claude Events May Arrive Before Dashboard Ready ► src/program.ts:241-251
+  - Gap: mainLoop starts Claude before dashboard SSE clients may connect
+  - Current: No check if dashboard is ready before broadcasting events
+  - Impact: First few Claude events in iteration may be lost
+  - Fix: Buffer events until first client connects, or accept loss as expected behavior
+
+P3.66 Dashboard Build Not Validated Before Server Start ► src/server.ts:188-210
+  - Gap: Server starts successfully but dashboard 404s if not built
+  - Current: Returns 404 with "Run bun run build" message at line 206
+  - Impact: Confusing UX - server starts but dashboard shows error
+  - Fix: Check if dist directory exists in startDashboardServer() and warn/fail
+
+### New P4 Items (Polish)
+
+P4.57 No React Error Boundary in Dashboard ► dashboard/src/App.tsx
+  - Gap: No error boundary component, uncaught errors crash entire UI
+  - Current: No componentDidCatch or ErrorBoundary anywhere in dashboard/
+  - Impact: Parse errors, null references, or runtime exceptions show white screen
+  - Fix: Add error boundary wrapper with "Something went wrong" fallback UI
+
+P4.58 ActivityLog Ref Race Condition ► dashboard/src/App.tsx:9,38
+  - Gap: ActivityLog ref can be null when events arrive early
+  - Current: Uses optional chaining `activityLogRef.current?.addEvent(event.data)`
+  - Impact: Events arriving before component mount are silently dropped
+  - Fix: Queue events until ref is attached, or accept as expected startup behavior
+
+### New P5 Items (Consistency)
+
+P5.71 Placeholder State Uses Wrong Branch Value ► src/main.ts:38-50
+  - Gap: Placeholder state has hardcoded `branch: "main"` instead of actual branch
+  - Current: `args.branch` parsed at line 27 but not used in placeholder at line 45
+  - Impact: Dashboard shows "main" instead of actual branch during development
+  - Fix: Use `args.branch ?? "main"` in placeholder state
+
+P5.72 DashboardPath Not in ConfigService ► src/services/Config.ts:4-16
+  - Gap: DashboardLive.start() requires dashboardPath but ConfigService doesn't provide it
+  - Current: No dashboardPath field in ConfigService interface
+  - Impact: Production has no way to configure dashboard dist path
+  - Fix: Add dashboardPath to ConfigService with default based on RALPH_HOME
+
+---
+
+Iteration 21 Dependency Graph Additions:
+P2.102-104 Type Safety ─────────────► State synchronization and validation
+  └─ P2.102 Type Divergence ────────► Single source of truth needed
+  └─ P2.103 StateEvent Partial ─────► Dashboard state completeness
+  └─ P2.104 Mode Validation ────────► User input handling
+
+P3.63-66 Robustness ────────────────► Connection stability and startup
+  └─ P3.63 SSE Heartbeat ───────────► P3.56 SSE Reconnect (complements)
+  └─ P3.64 Reconnect State ─────────► P3.63 SSE Heartbeat (requires)
+  └─ P3.65 Event Timing ────────────► Dashboard integration
+  └─ P3.66 Build Validation ────────► Server startup
+
+P4.57-58 Polish ────────────────────► UI robustness
+P5.71-72 Consistency ───────────────► Configuration patterns
+
+Summary (Iteration 21):
+- 3 new P2 items (P2.102-P2.104) - Type safety and state issues
+- 4 new P3 items (P3.63-P3.66) - Robustness improvements
+- 2 new P4 items (P4.57-P4.58) - Polish items
+- 2 new P5 items (P5.71-P5.72) - Consistency patterns
+- Total new items: 11
+
+Running totals:
+- P1 items: 249 (unchanged)
+- P2 items: 104 (was 101)
+- P3 items: 66 (was 62)
+- P4 items: 58 (was 56)
+- P5 items: 72 (was 70)
+- P6 items: 68 (unchanged)
+- Grand total: 617 items (was 606)
