@@ -6670,3 +6670,544 @@ Running totals:
 - P6 items: 79 (was 76)
 - P7 items: 10 (new category)
 - Grand total: 804 items (was 747)
+
+---
+
+## Iteration 27: Deep Analysis (Jan 2026)
+
+### Research Focus
+- Deep spec analysis (networking, container, logging-telemetry)
+- Layer implementation review (ClaudeLive, DockerLive, GitLive, ConfigLive, DashboardLive)
+- Container security and Docker configuration
+- Test coverage detailed analysis
+
+### New P1 Items (Critical)
+
+P1.321 Firewall Rule Ordering Mismatch ► docker/init-firewall.sh:39-51,124-137
+  - Gap: Loopback and DNS rules added BEFORE default DROP policies
+  - Spec shows default policies should be set first for security
+  - Impact: Time window where traffic isn't properly blocked during init
+  - Fix: Reorder to set default DROP policies before exception rules
+
+P1.322 Host Network Auto-Detection Validation Missing ► docker/init-firewall.sh:110-122
+  - Gap: Detects host network via `ip route | grep default`
+  - If detection fails, firewall init fails with no fallback
+  - No validation that detected network is sensible (not 0.0.0.0)
+  - Impact: False positives, container startup failures
+  - Fix: Add network validation and fallback handling
+
+P1.323 Docker DNS Rule Preservation Fragility ► docker/init-firewall.sh:17-37
+  - Gap: Saves DNS rules with `iptables-save | grep "127.0.0.11"`
+  - Restores with `xargs -L 1 iptables -t nat`
+  - If Docker changes rule format, parsing breaks
+  - Impact: DNS resolution fails, breaks all network operations
+  - Fix: Add rule format validation before restore
+
+P1.324 Entrypoint SSH Key Path Mismatch ► docker/entrypoint.sh:15-28
+  - Gap: Checks for `/home/node/.ssh` but spec shows mount at `/root/.ssh:ro`
+  - Line 15 checks wrong path, lines 23-26 may configure with missing keys
+  - Impact: SSH git operations fail silently
+  - Fix: Align paths between mount and entrypoint check
+
+P1.325 Git Config Conditional on GITHUB_TOKEN ► docker/entrypoint.sh:30-33
+  - Gap: Only configures credential helper if GITHUB_TOKEN is set
+  - Users with gh CLI configured via SSO/device auth blocked
+  - Impact: Cannot clone private repos via HTTPS without env var
+  - Fix: Configure helper unconditionally, let gh CLI handle auth
+
+P1.326 Entrypoint Never Validates Firewall Actually Ready ► docker/entrypoint.sh:8-9
+  - Gap: Calls init-firewall.sh and immediately proceeds
+  - If script exits 0 but firewall isn't functional, no detection
+  - Impact: Container starts with non-functional firewall
+  - Fix: Add verification check before dropping privileges
+
+P1.327 Ralph Progress File Never Created ► templates/ralph-instructions.md:16,33,190-217
+  - Gap: Template instructs Claude to read/write ralph-progress.txt
+  - No code creates this file or ensures it exists
+  - Impact: Claude gets error on first iteration trying to read progress
+  - Fix: Create progress file during session creation
+
+P1.328 Verification Command Execution Not Implemented ► specs/orchestrator.md:101-123
+  - Gap: Orchestrator never runs verify_command from features.json
+  - Relies entirely on Claude to run verification
+  - Spec says orchestrator should enforce verification as gate
+  - Impact: Claude can skip verification and mark passes:true without running checks
+  - Fix: Implement verify_command execution in mainLoop
+
+P1.329 No Container Name in Iteration State ► src/program.ts:290-291
+  - Gap: Initial state has iteration, noChangeCount, remainingFeaturesCount
+  - Spec at line 210 shows containerName is part of state
+  - Impact: Cannot reference container from within iteration loop
+  - Fix: Add containerName to IterationState type and initial state
+
+P1.330 Type Mismatch: tool_result Not in ContentBlock ► src/types.ts:95-102
+  - Gap: ContentBlock union includes tool_use but no tool_result
+  - Spec shows tool_result events exist in stream
+  - Impact: Runtime errors when parsing tool_result events
+  - Fix: Add tool_result to ContentBlock union type
+
+P1.331 Command Injection in ClaudeLive Prompt ► src/layers/ClaudeLive.ts:41,89
+  - Gap: Prompt wrapped in double quotes with no escaping
+  - Shell metacharacters (quotes, backticks) not escaped
+  - Impact: Security vulnerability, command injection via malicious prompts
+  - Fix: Use proper shell escaping or pass prompt via stdin
+
+P1.332 Command Injection in DockerLive.listByPrefix ► src/layers/DockerLive.ts:296
+  - Gap: Prefix interpolated directly into shell command
+  - Single quotes or metacharacters break command
+  - Impact: Security vulnerability, command injection via prefix
+  - Fix: Use proper shell escaping for prefix parameter
+
+P1.333 Command Injection in GitLive All Operations ► src/layers/GitLive.ts:33,47,66,81,97,113,131,135
+  - Gap: Branch names, user name, email concatenated directly into commands
+  - No validation or escaping for shell metacharacters
+  - Impact: Security vulnerability, arbitrary command execution
+  - Fix: Validate inputs and use proper escaping
+
+P1.334 No IPv6 Filtering in Firewall ► docker/init-firewall.sh:21-26
+  - Gap: Script only configures iptables (IPv4)
+  - No ip6tables rules at all
+  - If container has IPv6 connectivity, all IPv6 traffic unrestricted
+  - Impact: IPv6 traffic bypasses entire firewall
+  - Fix: Add parallel ip6tables rules or disable IPv6
+
+P1.335 Insecure Git SSH Configuration ► docker/entrypoint.sh:26
+  - Gap: Uses StrictHostKeyChecking=no, UserKnownHostsFile=/dev/null
+  - Disables host key verification
+  - Impact: SSH connections vulnerable to MITM attacks
+  - Fix: Pre-populate known_hosts with GitHub keys or verify fingerprints
+
+P1.336 No Seccomp Profile for Container ► src/services/Docker.ts:13-21
+  - Gap: ContainerConfig lacks securityOpt field
+  - No seccomp profile restricts system calls
+  - Impact: Container has access to all system calls
+  - Fix: Add seccomp profile configuration and apply restrictive profile
+
+P1.337 Secrets in Environment Variables ► src/program.ts:42-43
+  - Gap: OAUTH_TOKEN and GITHUB_TOKEN passed as env vars
+  - Visible in docker inspect, process listings, child processes
+  - Impact: Secrets exposed to all container processes
+  - Fix: Use Docker secrets or inject via file
+
+P1.338 No Timeout for Firewall Initialization ► src/program.ts:70-75
+  - Gap: Fixed 3-second sleep instead of detecting "Ralph Firewall Ready"
+  - If firewall takes longer, orchestrator proceeds too early
+  - Comment acknowledges as TODO but not implemented
+  - Impact: Race condition, operations start before firewall ready
+  - Fix: Implement log streaming detection with timeout fallback
+
+P1.339 DashboardLive Path Traversal Vulnerability ► src/layers/DashboardLive.ts:111,168
+  - Gap: dashboardPath + filePath concatenation without validation
+  - No checks for path traversal (../)
+  - Impact: Clients could request /../../../etc/passwd
+  - Fix: Validate and normalize path, reject traversal
+
+P1.340 No Resource Limits for Containers ► src/services/Docker.ts:13-21
+  - Gap: ContainerConfig lacks memory, cpus, pidsLimit fields
+  - Containers can consume unlimited host resources
+  - Impact: Runaway process could DoS host
+  - Fix: Add resource limit fields and set reasonable defaults
+
+### New P2 Items (Architecture)
+
+P2.132 Missing Error Preservation in ClaudeLive ► src/layers/ClaudeLive.ts:61-63,128-130
+  - Gap: DockerError's command, exitCode, stderr lost when mapping
+  - Only cause field preserved
+  - Impact: Loss of debugging information
+  - Fix: Preserve all error context in ClaudeError
+
+P2.133 Hardcoded Model ID in Two Locations ► src/layers/ClaudeLive.ts:27,76
+  - Gap: Model "claude-opus-4-5-20251101" hardcoded twice
+  - If one updated but not other, inconsistency
+  - Impact: Maintenance burden, potential for drift
+  - Fix: Extract to constant or config
+
+P2.134 No Scoped Resource Management for execStream ► src/layers/ClaudeLive.ts:94-100
+  - Gap: execStream returns scoped Effect, wrapped in Stream.unwrap
+  - No explicit scope management for the unwrap
+  - Impact: Potential resource leak if stream not properly closed
+  - Fix: Ensure proper scope management for streamed resources
+
+P2.135 Race Condition in Docker inspect() ► src/layers/DockerLive.ts:137-197
+  - Gap: Three separate docker inspect calls for state/status/id
+  - Container state could change between calls
+  - Impact: Inconsistent ContainerInfo with contradictory data
+  - Fix: Single docker inspect call, parse all fields
+
+P2.136 TextDecoder Shared Across Streams ► src/layers/DockerLive.ts:232
+  - Gap: Single TextDecoder instance decodes both stdout and stderr
+  - TextDecoder maintains state for multi-byte sequences
+  - Impact: Multi-byte chars split across chunks could corrupt decoding
+  - Fix: Separate TextDecoder per stream
+
+P2.137 No Timeout on Docker Commands ► src/layers/DockerLive.ts (all)
+  - Gap: Docker command executions have no timeouts
+  - Commands can hang indefinitely if daemon unresponsive
+  - Impact: Operations hang forever, no recovery
+  - Fix: Add configurable timeouts to all Docker operations
+
+P2.138 Race Condition in DashboardLive State Updates ► src/layers/DashboardLive.ts:54-59
+  - Gap: updateAndBroadcast reads and updates in two operations
+  - Between Ref.update and Ref.get, concurrent update could occur
+  - Impact: SSE clients could receive stale state
+  - Fix: Use single Ref.modify or atomic update-and-get
+
+P2.139 No Error Propagation from Effect.runSync ► src/layers/DashboardLive.ts:127-133,136,145-151
+  - Gap: Multiple runSync calls without error handling
+  - If Ref operations fail, runSync throws uncaught exception
+  - Impact: Unhandled exceptions crash SSE server
+  - Fix: Wrap runSync in try-catch or use runSyncExit
+
+P2.140 Duplicate Implementation createBranch vs checkout ► src/layers/GitLive.ts:19-44,112-122
+  - Gap: Both execute `git checkout -b <branch>` with different error handling
+  - Functionality duplicated
+  - Impact: Bugs need fixing in two places, inconsistent errors
+  - Fix: Consolidate into single implementation
+
+P2.141 No Handling of Detached HEAD State ► src/layers/GitLive.ts:80-91
+  - Gap: hasUnpushedCommits uses git branch --show-current
+  - In detached HEAD, returns empty string
+  - Would construct invalid "origin//HEAD" in log command
+  - Impact: Method fails with confusing git error
+  - Fix: Detect and handle detached HEAD explicitly
+
+P2.142 Missing Client Cleanup in DashboardLive ► src/layers/DashboardLive.ts:28-34
+  - Gap: Broadcast catches errors silently, comment says "will be removed on next cleanup"
+  - No cleanup mechanism implemented
+  - Impact: Dead clients accumulate, memory leak, wasted CPU on broadcasts
+  - Fix: Implement periodic cleanup or immediate removal on error
+
+P2.143 outputFormat Flag Ignored in runWithEvents ► src/layers/ClaudeLive.ts:87
+  - Gap: Forces --output-format stream-json regardless of options
+  - run() respects outputFormat flag, runWithEvents() doesn't
+  - Impact: Inconsistent API behavior
+  - Fix: Document behavior or allow override
+
+P2.144 Server Stop Doesn't Close Active Connections ► src/layers/DashboardLive.ts:181-187,191-197
+  - Gap: stop() calls server.stop() but doesn't close SSE clients
+  - Clients in clientsRef are orphaned
+  - Impact: Clients timeout rather than receiving clean closure
+  - Fix: Close all client controllers before stopping server
+
+### New P3 Items (Robustness)
+
+P3.99 No Retry on GitHub API Failure ► docker/init-firewall.sh:57-62
+  - Gap: Single curl to api.github.com/meta
+  - Network blip or rate limit causes immediate failure
+  - Impact: Transient failures block container startup
+  - Fix: Add retry with exponential backoff
+
+P3.100 No Fallback GitHub IP Ranges ► docker/init-firewall.sh:55-76
+  - Gap: If GitHub API down, firewall init fails
+  - Could bundle known IP ranges as fallback
+  - Impact: Container startup fails when GitHub API unavailable
+  - Fix: Add bundled fallback IP ranges
+
+P3.101 Firewall Rules Not Idempotent ► docker/init-firewall.sh:20-27
+  - Gap: Flushes all rules and recreates from scratch
+  - If run twice, ipset destroy may fail if set not empty
+  - Impact: Container restart fragility
+  - Fix: Use idempotent rule creation patterns
+
+P3.102 TOCTOU for IP Resolution ► docker/init-firewall.sh:92-108
+  - Gap: Domain names resolved once at startup
+  - IPs can change (especially CloudFlare-hosted sites)
+  - Impact: Legitimate services become unreachable after IP change
+  - Fix: Use broader CIDR ranges or refresh resolution periodically
+
+P3.103 Host Network Detection Assumes /24 ► docker/init-firewall.sh:117
+  - Gap: Uses sed to convert to .0/24 regardless of actual mask
+  - Incorrect for /16, /25+ networks
+  - Impact: May allow/block wrong IP ranges
+  - Fix: Detect actual subnet mask from ip route output
+
+P3.104 Incomplete Firewall Verification Tests ► docker/init-firewall.sh:139-168
+  - Gap: Only tests blocked domain, GitHub API, Anthropic API
+  - Missing: SSH port 22, DNS resolution, host network, IPv6
+  - Impact: Partial verification may miss failures
+  - Fix: Add comprehensive verification tests
+
+P3.105 No Container Name Validation ► src/layers/DockerLive.ts:100-318
+  - Gap: All methods accept containerName without validation
+  - Docker has name restrictions (alphanumeric, hyphens, underscores)
+  - Impact: Invalid names cause cryptic Docker errors
+  - Fix: Validate container names before use
+
+P3.106 No Branch Name Validation ► src/layers/GitLive.ts:20,46,112
+  - Gap: Branch names accepted without validation
+  - Git has restrictions (no spaces, certain chars, no leading -)
+  - Impact: Invalid names cause cryptic git errors
+  - Fix: Validate branch names before use
+
+P3.107 No Validation for configureUser Inputs ► src/layers/GitLive.ts:124-137
+  - Gap: User name and email interpolated without validation
+  - No length limits, special char checks, email format validation
+  - Impact: Invalid values break git config or enable injection
+  - Fix: Validate inputs before use
+
+P3.108 No Push Conflict/Auth Failure Distinction ► src/layers/GitLive.ts:58-75
+  - Gap: Push maps all errors to generic GitError
+  - Doesn't distinguish conflicts, auth failures, network issues
+  - Impact: Cannot tell recoverable from unrecoverable errors
+  - Fix: Parse git error output and categorize
+
+P3.109 Silent Failure for Missing GITHUB_TOKEN ► src/layers/ConfigLive.ts:45-47
+  - Gap: Missing token defaults to empty string with orElse
+  - No logging or warning
+  - Impact: Auth failures hard to trace to missing token
+  - Fix: Add warning log when token missing
+
+P3.110 No Git Root Directory Validation ► src/layers/ConfigLive.ts:50
+  - Gap: Git root from command output used directly
+  - Not validated as absolute path, existing directory, accessible
+  - Impact: Unexpected output used without checks
+  - Fix: Validate git root before use
+
+### New P4 Items (Dashboard/UX)
+
+P4.79 Iteration Metrics Type Never Defined ► specs/logging-telemetry.md:91-101
+  - Gap: Spec defines IterationMetrics with token counts, context %
+  - Interface doesn't exist in src/types.ts
+  - Impact: Dashboard can't display iteration cards per spec
+  - Fix: Define IterationMetrics interface
+
+P4.80 iteration_start Event Type Never Emitted ► specs/logging-telemetry.md:72-77
+  - Gap: Spec requires special event marking iteration boundaries
+  - No code emits this event type
+  - Impact: JSONL log parsing can't identify iteration starts
+  - Fix: Add iteration_start event emission
+
+P4.81 Prompt Display Missing from Dashboard ► specs/logging-telemetry.md:170-182
+  - Gap: Spec shows prompt at top of activity panel
+  - No component renders prompt, no event carries prompt content
+  - Impact: Required dashboard feature missing
+  - Fix: Add prompt display component
+
+P4.82 Thinking Block Rendering Not Hidden ► specs/logging-telemetry.md:166-169
+  - Gap: Thinking blocks should be hidden by default
+  - No dashboard code hides them
+  - Impact: Will render thinking text to users
+  - Fix: Add toggle, default to hidden
+
+P4.83 Subagent Tracker Interface Not Implemented ► specs/logging-telemetry.md:208-228
+  - Gap: Spec defines SubagentTracker with startTime, endTime, result
+  - Interface not defined anywhere
+  - Impact: Dashboard can't show subagent activity
+  - Fix: Implement SubagentTracker interface and tracking
+
+P4.84 Missing /logs/:iteration Endpoint ► specs/logging-telemetry.md:281-284
+  - Gap: Dashboard needs to fetch specific iteration logs
+  - Endpoint doesn't exist in src/server.ts
+  - Impact: Session recovery broken
+  - Fix: Implement endpoint
+
+P4.85 Missing /rerun Endpoint ► specs/logging-telemetry.md:245-254
+  - Gap: Prompt editing requires rerun with modified prompt
+  - Endpoint doesn't exist
+  - Impact: Debugging workflow missing
+  - Fix: Implement endpoint
+
+P4.86 Missing /iterations Endpoint ► specs/logging-telemetry.md:274-280
+  - Gap: Dashboard sidebar needs list of all iterations with metrics
+  - Endpoint doesn't exist
+  - Impact: Dashboard navigation broken
+  - Fix: Implement endpoint
+
+P4.87 No CORS Preflight Handling ► src/layers/DashboardLive.ts:115-176
+  - Gap: Has Access-Control-Allow-Origin for SSE but no OPTIONS handler
+  - Cross-origin preflight will fail
+  - Impact: Dashboard may not work from different origin
+  - Fix: Add OPTIONS handler for CORS preflight
+
+P4.88 Missing Content-Type for Static Files ► src/layers/DashboardLive.ts:170-172
+  - Gap: Static files served with Bun default content-type inference
+  - Some extensions may get application/octet-stream
+  - Impact: Files may not render correctly in browser
+  - Fix: Explicit MIME type mapping
+
+### New P5 Items (Consistency)
+
+P5.89 Git Safe Directory Config Race ► src/program.ts:122-135, docker/entrypoint.sh:11
+  - Gap: Entrypoint and program.ts both configure safe.directory
+  - Unclear which wins, duplicate configuration
+  - Impact: Configuration confusion
+  - Fix: Configure in one place only
+
+P5.90 No Structured Logging Across Layers ► src/layers/*.ts
+  - Gap: None of the layer implementations have logging
+  - No audit trail for operations
+  - Impact: Difficult to diagnose issues in production
+  - Fix: Add structured logging to all layers
+
+P5.91 Inconsistent Error Context Preservation ► src/layers/*.ts
+  - Gap: Some error mappings preserve full context, others lose info
+  - ClaudeLive loses DockerError context, DockerLive preserves it
+  - Impact: Inconsistent debugging experience
+  - Fix: Standardize error context preservation
+
+P5.92 No Metrics or Observability ► src/layers/*.ts
+  - Gap: No metrics for operation latencies, error rates, resource usage
+  - Impact: Cannot identify performance bottlenecks
+  - Fix: Add metrics collection
+
+P5.93 Inconsistent Error Message Styles ► src/layers/ConfigLive.ts:35-42,17-21
+  - Gap: "Required environment variable not set" vs "Not in a git repository"
+  - Different styles for similar errors
+  - Impact: Inconsistent user experience
+  - Fix: Standardize error message format
+
+P5.94 Layer Dependency Comment Mismatch ► src/layers/index.ts:19-20
+  - Gap: Comment says DockerLive depends on ConfigService
+  - DockerLive doesn't actually depend on ConfigService
+  - Impact: Misleading documentation
+  - Fix: Update comment to match reality
+
+P5.95 Hardcoded Timeout Mismatch ► src/layers/ConfigLive.ts:60, src/program.ts:244
+  - Gap: Config timeout is 5 minutes, program uses 10 minutes
+  - Inconsistent timeout configuration
+  - Impact: ConfigService timeout not actually used
+  - Fix: Unify timeout configuration
+
+P5.96 No Validation of Layer Composition Parameters ► src/layers/index.ts:28-40
+  - Gap: MainLive accepts containerName, cliArgs without validation
+  - Empty strings, null values passed through
+  - Impact: Invalid parameters cause confusing errors later
+  - Fix: Validate parameters at composition time
+
+### New P6 Items (Minor)
+
+P6.80 Unnecessary Tools in Production Image ► docker/Dockerfile.base:16-30
+  - Gap: Image includes curl, sudo, unzip after build
+  - sudo should not be needed in production container
+  - Impact: Increased attack surface
+  - Fix: Use multi-stage build to remove unnecessary tools
+
+P6.81 Missing USER Directive in Dockerfile ► docker/Dockerfile.base:63-78
+  - Gap: Creates node user but never executes USER directive
+  - Container runs as root by default
+  - Impact: Relies on entrypoint to drop privileges
+  - Fix: Add USER node directive after setup
+
+P6.82 No Image Verification in Dockerfile ► docker/Dockerfile.base:33,47,55
+  - Gap: Downloads GitHub CLI, Bun, Claude without checksum verification
+  - curl | bash pattern is unsafe
+  - Impact: Supply chain security risk
+  - Fix: Add checksum verification for downloaded installers
+
+P6.83 Type Safety Violation with 'as any' ► src/layers/DashboardLive.ts:63,188
+  - Gap: Service implementation cast to any
+  - Disables type checking for implementation
+  - Impact: Type errors not caught at compile time
+  - Fix: Fix type annotations to eliminate as any
+
+P6.84 No tmpfs for Sensitive Data ► docker/entrypoint.sh:16-20
+  - Gap: SSH keys copied to /tmp/.ssh regular filesystem
+  - Keys persist in container layer
+  - Impact: Keys may persist after session
+  - Fix: Use tmpfs mount for sensitive temporary data
+
+P6.85 Environment Variable Leakage ► docker/entrypoint.sh:31-33
+  - Gap: GITHUB_TOKEN, OAUTH_TOKEN remain in env for all processes
+  - Inherited by all child processes
+  - Impact: Secrets may appear in error messages/logs
+  - Fix: Unset env vars after configuration or use scoped credential approach
+
+P6.86 No AppArmor/SELinux Configuration ► Docker configuration
+  - Gap: No mandatory access control profiles specified
+  - Impact: Missing defense-in-depth layer
+  - Fix: Add AppArmor or SELinux profile configuration
+
+P6.87 Firewall Verification Curl Timeout ► docker/init-firewall.sh:144-164
+  - Gap: Uses --connect-timeout 5 for blocked domains
+  - Blocked should fail instantly with REJECT
+  - Impact: Slower startup, doesn't verify REJECT working
+  - Fix: Use shorter timeout, verify immediate failure
+
+### New P7 Items (Test Coverage)
+
+P7.11 createSession Resume Path Untested ► src/program.ts:170-196
+  - Gap: isResume vs new session logic has no tests
+  - Impact: Resume flow may break silently
+  - Fix: Add tests for both resume and new session paths
+
+P7.12 Docker Argument Building Logic Untested ► src/layers/DockerLive.ts:42-81
+  - Gap: Volume, env, capability flag construction untested
+  - Impact: Argument building bugs undetected
+  - Fix: Add unit tests for argument construction
+
+P7.13 NDJSON Stream Parsing Integration Untested ► src/layers/ClaudeLive.ts:104-113
+  - Gap: Parsing NDJSON from Docker exec stream untested
+  - Impact: Stream parsing bugs undetected
+  - Fix: Add integration tests with real NDJSON streams
+
+P7.14 Timeout vs StreamError Discrimination Untested ► src/layers/ClaudeLive.ts:120-131
+  - Gap: Error type discrimination logic untested
+  - Impact: Wrong error types may be returned
+  - Fix: Add tests for each error type case
+
+P7.15 Git Branch Extraction Untested ► src/layers/GitLive.ts:80-91
+  - Gap: git branch --show-current parsing untested
+  - Impact: Branch extraction bugs undetected
+  - Fix: Add tests for various git branch outputs
+
+P7.16 Unpushed Commit Detection Untested ► src/layers/GitLive.ts:94-109
+  - Gap: git log rev-list parsing untested
+  - Impact: Incorrect unpushed detection
+  - Fix: Add tests for various commit states
+
+P7.17 SSE Client Tracking Untested ► src/layers/DashboardLive.ts:127-153
+  - Gap: Client add/remove lifecycle untested
+  - Impact: Client tracking bugs undetected
+  - Fix: Add tests for client lifecycle
+
+P7.18 Bun.serve Configuration Untested ► src/layers/DashboardLive.ts:113-179
+  - Gap: Server configuration and startup untested
+  - Impact: Server startup bugs undetected
+  - Fix: Add integration tests for server lifecycle
+
+P7.19 HTTP Endpoint Handlers Untested ► src/server.ts:235-281
+  - Gap: pause, resume, step-mode, stop handlers untested
+  - Impact: Endpoint bugs undetected
+  - Fix: Add HTTP handler tests
+
+P7.20 Static File Serving Untested ► src/server.ts:294-295
+  - Gap: File serving and MIME type logic untested
+  - Impact: File serving bugs undetected
+  - Fix: Add static file serving tests
+
+---
+
+Iteration 27 Dependency Graph:
+P1.321-326 Firewall/Entrypoint ─────────► Container security
+P1.327-329 Session/State ───────────────► Core orchestration
+P1.330 Type Safety ─────────────────────► Stream reliability
+P1.331-333 Command Injection ───────────► Security critical
+P1.334-337 Container Security ──────────► Defense in depth
+P1.338-340 Resources/Paths ─────────────► Reliability
+
+P2.132-144 Layer Architecture ──────────► Code quality
+P3.99-110 Robustness ───────────────────► Reliability
+P4.79-88 Dashboard ─────────────────────► User experience
+P5.89-96 Consistency ───────────────────► Maintainability
+P6.80-87 Minor Security ────────────────► Hardening
+P7.11-20 Test Coverage ─────────────────► Quality assurance
+
+Summary (Iteration 27):
+- 20 new P1 items (P1.321-P1.340) - Security, firewall, type safety
+- 13 new P2 items (P2.132-P2.144) - Architecture issues
+- 12 new P3 items (P3.99-P3.110) - Robustness improvements
+- 10 new P4 items (P4.79-P4.88) - Dashboard/UX gaps
+- 8 new P5 items (P5.89-P5.96) - Consistency issues
+- 8 new P6 items (P6.80-P6.87) - Minor security/polish
+- 10 new P7 items (P7.11-P7.20) - Test coverage
+- Total new items: 81
+
+Running totals:
+- P1 items: 340 (was 320)
+- P2 items: 144 (was 131)
+- P3 items: 110 (was 98)
+- P4 items: 88 (was 78)
+- P5 items: 96 (was 88)
+- P6 items: 87 (was 79)
+- P7 items: 20 (was 10)
+- Grand total: 885 items (was 804)
