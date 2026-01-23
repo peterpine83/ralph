@@ -241,6 +241,7 @@ Document:
 - **Stream utilities ready**: parseNDJSON() handles Claude's stream-json output format
 - **ZFC architecture**: Ralph delegates ALL reasoning to Claude, no heuristics or keyword matching
 - **Two operational modes**: Plan mode generates .ralph/IMPLEMENTATION_PLAN.md, build mode implements features.json
+- **Dependencies install cleanly**: Running `bun install` successfully installs all Effect packages (verified 2026-01-23)
 
 ## Blockers
 
@@ -259,8 +260,9 @@ None - all dependencies for Priority 1 are already implemented in program.ts. Th
 ## Verification Strategy
 
 After each priority:
-- Run `bun run typecheck` - All TypeScript types must resolve
-- Run `bun test` - All tests must pass
+- Run `bun install` - Install dependencies if not present
+- Run `bun run typecheck` - All TypeScript types must resolve (✓ verified clean)
+- Run `bun test` - All tests must pass (✓ 85 tests pass as of 2026-01-23)
 - For Priority 1: Manually run Ralph with `--once` flag to verify single iteration works
 - For Priority 2: Verify .ralph/sessions/{id}.jsonl exists and contains valid JSONL
 - For Priority 3: Verify container starts reliably and docker cp works if needed
