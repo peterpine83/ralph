@@ -559,6 +559,37 @@
   - Filter out content blocks with `type: "thinking"` before broadcasting to dashboard
   - Still log to JSONL for debugging if needed
 
+### 1.73 server.ts Set Mutation During Iteration (NEW - Jan 2026 Iteration 5)
+- [ ] Fix Set.delete() during iteration in server.ts broadcast (refs: src/server.ts:31-40)
+  - Current code at line 38 deletes clients while iterating over the Set
+  - JavaScript Set iteration behavior with mid-iteration deletion is undefined
+  - Fix: Collect failed clients in array, delete after iteration completes
+  - Similar to P2.13 for DashboardLive, but this is the legacy server.ts
+
+### 1.74 Stream Reader Lock Release Pattern (NEW - Jan 2026 Iteration 5)
+- [ ] Release stdin reader lock in finally block (refs: ralph.ts:109-131)
+  - Pattern: `reader.releaseLock()` in finally block after stdin reads
+  - Without lock release, subsequent stdin reads may hang
+  - Required for P2.5 Interactive CLI Prompts implementation
+
+### 1.75 TextDecoder Stream Option (NEW - Jan 2026 Iteration 5)
+- [ ] Use `decoder.decode(value, { stream: true })` for chunked decoding (refs: ralph.ts:269,275)
+  - Without `stream: true` option, multi-byte UTF-8 characters split across chunks will corrupt
+  - Required for P3.13 NDJSON Buffer Management implementation
+  - Critical for international text content in Claude responses
+
+### 1.76 Remaining Buffer Processing After Stream End (NEW - Jan 2026 Iteration 5)
+- [ ] Process remaining buffer content after stream ends (refs: ralph.ts:294-302)
+  - After ReadableStream completes, check if buffer has remaining content
+  - Last line without newline would be lost without this
+  - Pattern: `if (buffer.trim()) { try JSON.parse, catch sendOutput }`
+
+### 1.77 Container Restart Exit Code Verification (NEW - Jan 2026 Iteration 5)
+- [ ] Verify exit code when restarting container (refs: ralph.ts:148-149)
+  - Pattern: `const result = await docker start; return result.exitCode === 0`
+  - Without exit code check, container might fail to restart but orchestrator continues
+  - Extends P1.10 Container Health Checks with explicit verification
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -1348,6 +1379,24 @@ The following are implemented in docker/entrypoint.sh and docker/init-firewall.s
 - Host network auto-detection and whitelisting
 These exist but weren't tracked in the plan - they work correctly.
 
+### Spec Inconsistencies Identified (Jan 2026 - Iteration 5)
+- **Timeout value inconsistency**: orchestrator.md:36 says "5-minute timeout", claude-integration.md:134 says "default 10 minutes", ralph.ts uses 1 hour
+- **Resolution**: P1.57 uses 1-hour safety fallback per ralph.ts pattern (Claude handles its own timeouts)
+- **Context window hardcoding**: specs/logging-telemetry.md:362-363 explicitly ties 200k to Opus 4, needs updating if model changes
+
+### SSH vs HTTPS Git Configuration
+Both are supported in parallel:
+- SSH (port 22): For users with SSH keys configured
+- HTTPS: Via `gh auth git-credential` helper for GitHub token users
+- P1.23, P1.34, P1.45 cover the configuration but this clarifies the dual-path design intent
+
+### Model Tiering Strategy (Future Enhancement, Out of Scope)
+Per specs/zfc-architecture.md:251-259:
+- Complex reasoning → Opus
+- Simple checks → Sonnet
+- Routing/classification → Haiku
+Explicitly out of scope for MVP but architecture allows future enhancement
+
 ### Out of Scope Items (per specs/logging-telemetry.md:348-357)
 NOT to be implemented (explicitly out of scope):
 - Session browser UI
@@ -1416,16 +1465,26 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 4)
+### Priority Summary (Updated Jan 2026 - Iteration 5)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 72 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete, 6 new items) |
+| P1 | Critical Integration | 77 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete, 5 new items from iteration 5) |
 | P2 | Dashboard Integration | 16 items | Core UX features |
 | P3 | Missing Functionality | 15 items | Logging/telemetry subsystem + streaming |
 | P4 | Robustness | 10 items | Production readiness |
 | P5 | Test Coverage | 12 items | Quality assurance (P5.9 duplicate of P5.2) |
 | P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
-| **Total** | | **152 items** | ~35-40% complete |
+| **Total** | | **157 items** | ~35-40% complete |
+
+**Key Findings Iteration 5 (Jan 2026 - Parallel Research with 3 Agents)**:
+- **NEW P1.73**: server.ts Set.delete during iteration - undefined behavior
+- **NEW P1.74**: Stream reader lock release pattern for stdin reads
+- **NEW P1.75**: TextDecoder `{ stream: true }` option for multi-byte chars
+- **NEW P1.76**: Remaining buffer processing after stream ends
+- **NEW P1.77**: Container restart exit code verification
+- **Spec Clarification**: Timeout values inconsistent across specs (5min vs 10min vs 1hr)
+- **Spec Clarification**: SSH vs HTTPS git operations are dual-path by design
+- **Spec Clarification**: Model tiering (Opus/Sonnet/Haiku) is future enhancement, out of MVP scope
 
 **Key Findings Iteration 4 (Jan 2026 - Deep Gap Analysis)**:
 - **NEW P1.67**: Docker image existence check before container creation
@@ -1663,4 +1722,11 @@ P1.69 Feature Slug Sanitize ──► P1.11 Branch Name Generation
 P1.70 GitHub Token Fallback ──► P1.6 Environment Validation
 P1.71 Shell Escaping Internal ► P1.21 Container User Switching (command construction)
 P1.72 Thinking Block Filter ──► P6.2 Output vs Event Distinction
+
+New P1 Items (Jan 2026 - Iteration 5):
+P1.73 server.ts Set Mutation ─► P2.1 Remove Legacy server.ts (consolidation eliminates issue)
+P1.74 Stream Reader Lock ─────► P2.5 Interactive CLI Prompts
+P1.75 TextDecoder Stream ─────► P3.13 NDJSON Buffer Management
+P1.76 Buffer Processing ──────► P3.13 NDJSON Buffer Management
+P1.77 Container Restart Code ─► P1.10 Container Health Checks
 ```
