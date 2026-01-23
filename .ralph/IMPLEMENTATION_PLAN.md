@@ -7506,3 +7506,333 @@ Additionally, the Effect-based implementation in src/main.ts is still a placehol
 3. Abort patterns for stop functionality
 4. Plan mode completion detection
 5. Final verification iteration
+
+---
+
+## Iteration 29 Research (Jan 2026)
+
+### Research Focus
+Comprehensive re-audit of specs vs implementation with focus on:
+1. Networking spec gaps (firewall IP whitelists)
+2. Dashboard component gaps vs logging-telemetry spec
+3. Test coverage analysis for untested modules
+4. Container spec utility location mismatches
+
+### New P1 Items (Critical)
+
+P1.358 GitHub .packages IP Ranges Missing from Firewall ► specs/networking.md:61, docker/init-firewall.sh:76
+  - Gap: Firewall jq query omits `.packages` field from GitHub meta API
+  - Spec: `echo "$gh_meta" | jq -r '(.web + .api + .git + .packages)[]'`
+  - Actual: `echo "$gh_meta" | jq -r '(.web + .api + .git)[]'`
+  - Impact: GitHub Packages (container registry, npm packages hosted on GitHub) blocked
+  - Fix: Add `.packages` to jq query in init-firewall.sh:76
+
+P1.359 githubusercontent.com Wildcard Not Whitelisted ► specs/networking.md:37, docker/init-firewall.sh
+  - Gap: *.githubusercontent.com not resolved or whitelisted
+  - Spec table lists it for "GitHub raw content"
+  - Includes: raw.githubusercontent.com, user-images.githubusercontent.com
+  - Impact: Raw file fetching from GitHub repos may fail
+  - Fix: Add githubusercontent.com resolution to firewall init
+
+P1.360 Tool Calls Collapsed by Default (Contradicts Spec) ► dashboard/src/components/ActivityLog.tsx:74, specs/logging-telemetry.md:113-124
+  - Gap: Tool calls have `expanded: false` in dashboard
+  - Spec: "All tool_use events display expanded, with a collapse button to minimize"
+  - Impact: User experience contradicts specification
+  - Fix: Change `expanded: false` to `expanded: true` in ActivityLog.tsx:74
+
+P1.361 IterationSidebar Component Missing ► specs/logging-telemetry.md:79-111
+  - Gap: No dashboard/src/components/IterationSidebar.tsx exists
+  - Required: Card per iteration with status indicator (✓/✗/●), token count, context %
+  - Current: Sidebar shows features list at App.tsx:86-91, not iteration history
+  - Impact: Required dashboard feature missing per spec
+  - Fix: Create IterationSidebar.tsx component
+
+P1.362 ToolCall Component Missing ► specs/logging-telemetry.md:113-165
+  - Gap: No dedicated ToolCall.tsx for formatted tool display
+  - Required: Syntax highlighting, line numbers for Read calls, expanded by default
+  - Current: Simple JSON.stringify at ActivityLog.tsx:261-285
+  - Impact: Poor tool call readability
+  - Fix: Create ToolCall.tsx with syntax highlighting
+
+P1.363 SubagentIndicator Component Missing ► specs/logging-telemetry.md:183-230
+  - Gap: No SubagentIndicator.tsx for Task tool tracking
+  - Required: Spinner with elapsed time, prompt text, completion indicator
+  - Current: Task tools rendered same as other tools
+  - Impact: No visibility into subagent execution timing
+  - Fix: Create SubagentIndicator.tsx component
+
+P1.364 useSessionRecovery Hook Missing ► specs/logging-telemetry.md:261-284
+  - Gap: No hook to restore state from JSONL on browser reconnect
+  - Required: Load /iterations, then /logs/:iteration on mount
+  - Current: SSE reconnects but loses all historical events
+  - Impact: Browser refresh loses entire activity log
+  - Fix: Create useSessionRecovery.ts hook
+
+P1.365 Syntax Highlighting Library Missing ► specs/logging-telemetry.md:126-138, dashboard/package.json
+  - Gap: No prism.js or highlight.js in dashboard dependencies
+  - Required: Auto-detect language from file extension
+  - Current: Plain <pre> tags with monospace font
+  - Impact: Code in tool calls hard to read
+  - Fix: Add syntax highlighting library to dashboard/package.json
+
+P1.366 Prompt Display Missing from Activity Log ► specs/logging-telemetry.md:170-181
+  - Gap: Prompt sent to Claude never shown in dashboard
+  - Required: Prompt at top of activity log for each iteration
+  - Data: state.promptTemplate exists but not sent to clients
+  - Impact: Users can't see what prompt triggered iteration
+  - Fix: Add prompt display to ActivityLog or create PromptDisplay component
+
+P1.367 Token/Usage Metrics Never Displayed ► specs/logging-telemetry.md:83-101
+  - Gap: Token counts from message.usage never extracted or shown
+  - Data: usage.input_tokens, output_tokens available in ClaudeMessageEvent
+  - Required: Show in iteration sidebar cards
+  - Impact: No visibility into token consumption
+  - Fix: Extract and display usage metrics
+
+P1.368 IterationMetrics Interface Not Defined ► specs/logging-telemetry.md:92-102, src/types.ts
+  - Gap: IterationMetrics interface doesn't exist
+  - Required fields: iteration, status, inputTokens, outputTokens, totalTokens, contextPercent, duration
+  - Impact: Cannot implement iteration sidebar without this type
+  - Fix: Add IterationMetrics to src/types.ts and dashboard/src/types.ts
+
+P1.369 iteration_start Event Type Missing ► specs/logging-telemetry.md:73-75
+  - Gap: No code emits iteration_start boundary markers
+  - Required: `{"type":"iteration_start","iteration":N,"timestamp":"..."}`
+  - Impact: JSONL parsing cannot identify iteration boundaries
+  - Fix: Emit iteration_start at start of each iteration in mainLoop
+
+P1.370 DashboardService Convenience Methods Missing ► specs/dashboard.md:172-178
+  - Gap: Dashboard service interface lacks setRunning(), setPaused() etc.
+  - Current: Only updateState(), broadcast(), sendOutput()
+  - Spec requires convenience setters
+  - Impact: Verbose state update code throughout
+  - Fix: Add convenience methods to DashboardService interface
+
+P1.371 GET /prompt Endpoint Missing ► specs/dashboard.md:201-203
+  - Gap: No endpoint to retrieve current prompt template
+  - Required for prompt display and editing features
+  - Impact: Dashboard cannot show current prompt
+  - Fix: Add GET /prompt endpoint to server.ts
+
+P1.372 PUT /prompt Endpoint Missing ► specs/dashboard.md:204-206
+  - Gap: No endpoint to update prompt template
+  - Required for prompt editing feature
+  - Impact: Cannot modify prompts from dashboard
+  - Fix: Add PUT /prompt endpoint to server.ts
+
+P1.373 Cost Aggregation Not Implemented ► specs/claude-integration.md:211-224
+  - Gap: cost_usd from result events captured but never aggregated
+  - Impact: No visibility into total session cost
+  - Fix: Track cumulative cost in DashboardState, display in UI
+
+### New P2 Items (Architecture)
+
+P2.149 Container Utility Location Mismatch ► specs/container.md:116
+  - Gap: Pure utilities in src/container.ts, spec says src/utils/container.ts
+  - Impact: Minor organizational inconsistency
+  - Fix: Move to src/utils/container.ts or update spec
+
+P2.150 Dashboard and Server Dual Implementation (Reinforced) ► src/server.ts, src/layers/DashboardLive.ts
+  - Gap: Both files implement SSE server with overlapping functionality
+  - server.ts: module-level mutable state for ralph.ts
+  - DashboardLive.ts: Effect-based with Ref for Effect impl
+  - Note: Already P2.145 but worth reinforcing - this is significant tech debt
+  - Fix: Consolidate to single Effect-based implementation
+
+P2.151 Service Interface Files Have No Tests ► src/services/*.ts
+  - Gap: Service interfaces are pure types, but runtime validation could be tested
+  - Files: Config.ts, Git.ts, Claude.ts, Docker.ts, Dashboard.ts
+  - Impact: No validation of service contracts
+  - Fix: Consider adding type guard tests or contract tests
+
+P2.152 Layer Composition Order Not Documented ► src/layers/index.ts:28-40
+  - Gap: MainLive layer composition has implicit dependency order
+  - Layer.mergeAll and Layer.provideMerge usage not documented
+  - Impact: Difficult to understand dependency graph
+  - Fix: Add documentation comments explaining layer dependencies
+
+### New P3 Items (Robustness)
+
+P3.115 No Recovery from Firewall Init Failure ► docker/init-firewall.sh
+  - Gap: If GitHub API down, container startup fails with no fallback
+  - P3.100 mentioned bundled IP ranges but no implementation exists
+  - Impact: Intermittent container startup failures
+  - Fix: Bundle known IP ranges as fallback when API unavailable
+
+P3.116 Malformed JSON in getRemainingFeatures() Not Tested ► src/container.ts
+  - Gap: Test coverage for container utilities lacks malformed JSON cases
+  - Current tests assume well-formed features.json
+  - Impact: Parsing errors may cause unclear failures
+  - Fix: Add tests for malformed JSON handling
+
+P3.117 NDJSON Backpressure Scenarios Not Tested ► src/streams/ndjson.test.ts
+  - Gap: No tests for extremely large JSON objects or backpressure
+  - Current tests use small well-formed inputs
+  - Impact: Production streams with large events may fail unexpectedly
+  - Fix: Add stress tests for NDJSON parser
+
+P3.118 Branch Name Special Characters Not Validated ► src/program.ts, src/layers/GitLive.ts
+  - Gap: Branch names accepted without validation for special characters
+  - P3.106 mentions this but worth reiterating: no tests for validation
+  - Impact: Invalid branch names cause cryptic git errors
+  - Fix: Add branch name validation tests
+
+### New P4 Items (Dashboard/UX)
+
+P4.92 Activity Log State Lost on Refresh ► dashboard/src/components/ActivityLog.tsx:24
+  - Gap: All events stored in React component state (in-memory only)
+  - Browser refresh loses entire activity history
+  - Requires useSessionRecovery hook to fix (see P1.364)
+  - Impact: Poor user experience for long sessions
+  - Fix: Implement session recovery from JSONL
+
+P4.93 No Iteration History Navigation ► dashboard/src/App.tsx
+  - Gap: Current iteration count shown at line 63 but no clickable history
+  - Can't view past iterations or navigate between them
+  - Requires IterationSidebar (P1.361) and /logs/:iteration endpoint (P1.341)
+  - Impact: Cannot debug past iterations
+  - Fix: Implement iteration sidebar with clickable cards
+
+P4.94 Thinking Blocks Rendered (Spec Says Don't) ► dashboard/src/components/ActivityLog.tsx:228-232
+  - Gap: Thinking blocks are rendered in collapsed state
+  - Spec says: "thinking blocks hidden by default. No toggle needed - simply not rendered"
+  - Current: Blocks exist but collapsed, minor deviation from spec
+  - Impact: Minor spec inconsistency (acceptable but noted)
+  - Fix: Consider removing thinking block rendering entirely
+
+### New P5 Items (Consistency)
+
+P5.100 Dashboard Types vs Server Types Mismatch ► dashboard/src/types.ts:20-24, src/types.ts
+  - Gap: Dashboard IterationData lacks fields spec requires (tokens, context %)
+  - Server types and dashboard types could drift
+  - Impact: Type mismatches between backend and frontend
+  - Fix: Ensure dashboard types match server types exactly
+
+P5.101 Timeout Configuration Scattered ► src/layers/ConfigLive.ts:60, src/program.ts:244
+  - Gap: Config timeout is 5 minutes, program uses 10 minutes (already P5.95)
+  - Reinforced: Timeout values should be in config, not hardcoded
+  - Impact: Confusing timeout behavior
+  - Fix: Consolidate timeout configuration
+
+### New P6 Items (Minor)
+
+P6.91 No Highlighter Package in dashboard/package.json ► dashboard/package.json
+  - Gap: Should add prism-react-renderer or similar for syntax highlighting
+  - Dependency needed for P1.365
+  - Impact: Blocking syntax highlighting feature
+  - Fix: Add dependency when implementing syntax highlighting
+
+P6.92 Dashboard dist/ Not in Git ► dashboard/
+  - Gap: Built dashboard not tracked, requires build step
+  - P4.89 mentioned this but worth noting: first-time setup friction
+  - Impact: Blank dashboard until build runs
+  - Fix: Either track dist/ or add build step to startup
+
+### New P7 Items (Test Coverage)
+
+P7.24 ConfigLive Layer Not Tested ► src/layers/ConfigLive.ts (68 lines)
+  - Gap: detectGitRoot(), makeConfigLive() untested
+  - Includes env var reading, git root detection, error mapping
+  - Impact: Configuration errors may not be caught
+  - Fix: Add tests for ConfigLive layer
+
+P7.25 DockerLive Layer Not Tested ► src/layers/DockerLive.ts (325 lines)
+  - Gap: All Docker operations untested (create, start, remove, inspect, exec, etc.)
+  - Highest risk: container creation with capabilities/volumes
+  - Impact: Docker command construction bugs undetected
+  - Fix: Add tests for DockerLive operations
+
+P7.26 GitLive Layer Not Tested ► src/layers/GitLive.ts (141 lines)
+  - Gap: checkout, fetch, push, hasUnpushedCommits untested
+  - All git operations in container context untested
+  - Impact: Git workflow bugs undetected
+  - Fix: Add tests for GitLive operations
+
+P7.27 ClaudeLive Layer Not Tested ► src/layers/ClaudeLive.ts (138 lines)
+  - Gap: run(), runWithEvents() untested
+  - Includes CLI argument building, timeout handling, stream parsing
+  - Impact: Claude invocation bugs undetected
+  - Fix: Add tests for ClaudeLive operations
+
+P7.28 DashboardLive Layer Not Tested ► src/layers/DashboardLive.ts (217 lines)
+  - Gap: Ref-based state, SSE client tracking, Bun.serve untested
+  - Impact: Dashboard server bugs undetected
+  - Fix: Add tests for DashboardLive operations
+
+P7.29 Server HTTP Endpoints Not Tested ► src/server.ts (301 lines)
+  - Gap: /events, /pause, /resume, /step-mode, /stop, /prompt untested
+  - Impact: HTTP handler bugs undetected
+  - Fix: Add HTTP handler tests with mock requests
+
+P7.30 createSession() Function Not Tested ► src/program.ts:23-200
+  - Gap: Entire container setup flow untested
+  - Complex multi-step: container creation, git clone, permission fixing, branch setup
+  - Impact: Session creation bugs undetected
+  - Fix: Add integration tests for createSession
+
+P7.31 MainLive Layer Composition Not Tested ► src/layers/index.ts:28-40
+  - Gap: Layer dependency injection order untested
+  - Impact: Composition bugs may cause runtime errors
+  - Fix: Add tests for MainLive layer composition
+
+P7.32 main.ts Entry Point Not Tested ► src/main.ts (69 lines)
+  - Gap: CLI arg parsing, BunRuntime.runMain execution untested
+  - Impact: Entry point bugs undetected
+  - Fix: Add entry point tests or integration tests
+
+P7.33 Error Paths in createSession Not Tested ► src/program.ts
+  - Gap: No tests for Docker failures, git clone failures, permission issues
+  - Only happy path tested via mocks
+  - Impact: Error handling bugs undetected
+  - Fix: Add error path tests for createSession
+
+---
+
+Iteration 29 Dependency Graph:
+P1.358-359 Firewall ─────────────────────► Network security
+P1.360-367 Dashboard UI ─────────────────► User experience (critical)
+P1.368-369 Types/Events ─────────────────► Data structures
+P1.370-373 Service/API ──────────────────► Feature completeness
+
+P2.149-152 Architecture ─────────────────► Code quality
+P3.115-118 Robustness ───────────────────► Reliability
+P4.92-94 UX Polish ──────────────────────► User experience
+P5.100-101 Consistency ──────────────────► Maintainability
+P6.91-92 Dependencies ───────────────────► Build/setup
+P7.24-33 Test Coverage ──────────────────► Quality assurance (critical)
+
+Summary (Iteration 29):
+- 16 new P1 items (P1.358-P1.373) - Firewall, dashboard UI, API gaps
+- 4 new P2 items (P2.149-P2.152) - Architecture issues
+- 4 new P3 items (P3.115-P3.118) - Robustness improvements
+- 3 new P4 items (P4.92-P4.94) - UX polish
+- 2 new P5 items (P5.100-P5.101) - Consistency issues
+- 2 new P6 items (P6.91-P6.92) - Build/dependencies
+- 10 new P7 items (P7.24-P7.33) - Test coverage
+- Total new items: 41
+
+Running totals:
+- P1 items: 373 (was 357)
+- P2 items: 152 (was 148)
+- P3 items: 118 (was 114)
+- P4 items: 94 (was 91)
+- P5 items: 101 (was 99)
+- P6 items: 92 (was 90)
+- P7 items: 33 (was 23)
+- Grand total: 963 items (was 922)
+
+### Iteration 29 Key Insight
+
+The test coverage analysis revealed a critical gap: **76% of source files have no tests**. The most concerning untested areas are:
+1. **All five Live layer implementations** (DockerLive, GitLive, ClaudeLive, ConfigLive, DashboardLive) - These execute real commands and are completely untested
+2. **createSession() function** - 178 lines of complex multi-step container initialization with zero test coverage
+3. **Server HTTP handlers** - All REST endpoints untested
+
+The dashboard is also significantly behind the logging-telemetry spec:
+- Phase 1 (Persistence & Recovery): 0% complete
+- Phase 2 (Iteration Sidebar): 0% complete
+- Phase 3 (Activity Log Improvements): 20% complete
+- Phase 4 (Subagent Tracking): 0% complete
+- Phase 5 (Prompt Editing): 0% complete
+
+The firewall has two specific gaps: missing `.packages` IP ranges and missing `*.githubusercontent.com` wildcard - both could cause legitimate GitHub operations to be blocked in production.
