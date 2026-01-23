@@ -3765,4 +3765,170 @@ P6.42 Duplicate Error Types ──────────► P6.39-P6.40 Type I
 P6.43 DashboardError Class ───────────► P1.165 DashboardError TaggedError (same)
 P6.44 runSync in Async ───────────────► Effect patterns
 P6.45 find Error Suppression ─────────► Error handling audit
+
+New P1 Items (Jan 2026 - Iteration 15):
+P1.186 Runtime Firewall Health Monitoring ► specs/networking.md, program.ts
+  - Firewall initialized at startup but never re-verified during session
+  - No detection if iptables rules are cleared or bypassed
+  - Add periodic firewall health check (e.g., every 10 iterations)
+  - Or verify firewall rules still active before sensitive operations
+
+P1.187 Feature CI Verification Gap ► specs/features.md:101-124, program.ts:213-266
+  - Spec: "CI suite must run after EVERY feature. Claude CANNOT mark passes: true until ALL checks pass"
+  - Orchestrator has no mechanism to verify CI was actually run
+  - Relies entirely on Claude's compliance with instructions
+  - Consider: orchestrator could run verification commands itself before accepting passes: true
+
+P1.188 AbortController Integration Missing ► ralph.ts:76-82, src/program.ts
+  - Legacy ralph.ts maintains `claudeAbortController` for stopping Claude mid-execution
+  - Effect-based code has no AbortController integration
+  - Dashboard stop button and SIGINT need to abort running Claude process
+  - Required for P1.5 (Signal Handling) and P1.16 (Dashboard Stop Button)
+
+P1.189 Session Cost Aggregation ► specs/claude-integration.md:212-224, src/program.ts
+  - Spec: "Cost can be aggregated across iterations for total session cost"
+  - ClaudeResultEvent contains cost_usd field
+  - No session-level cost accumulator in Effect implementation
+  - Add totalCost field to iteration state or dashboard state
+
+P1.190 Error Classification Audit ► specs/README.md:104-110, src/program.ts, src/errors
+  - Spec categorizes: Fatal errors (exit immediately) vs Recoverable errors (retry/continue)
+  - Current implementation treats most errors as fatal (Effect.fail propagates)
+  - Need systematic review: which errors should retry, which should exit
+  - Example: TimeoutError should continue (spec says so), but currently exits
+
+P1.191 Container Exec User Flag Consistency ► ralph.ts:208-215, DockerLive.ts:139-187
+  - Legacy ralph.ts uses `-u node` for git operations, root for chown
+  - DockerLive.exec() has userOverride parameter but not consistently used
+  - createSession in program.ts doesn't pass user flags for git operations
+  - Git commands may run as wrong user, causing permission issues
+
+P1.192 Remote URL Extraction Before Clone ► ralph.ts:201, program.ts:79-92
+  - Legacy ralph.ts extracts remote URL: `git remote get-url origin`
+  - Effect program.ts clones from `sessionConfig.gitRoot` (local path)
+  - Should clone from remote URL to ensure clean state (no uncommitted changes)
+  - Add git remote URL extraction step before container clone
+
+P1.193 Plan Mode PR Detection Logic ► ralph.ts:613-626, program.ts
+  - Plan mode completion: PR exists + no unpushed commits = done
+  - Effect implementation has no plan mode completion detection
+  - After plan mode iteration, should check `gh pr view` and commit state
+  - Different from build mode (feature-based completion)
+
+New P2 Items (Jan 2026 - Iteration 15):
+P2.62 Dashboard State Missing Fields ► DashboardLive.ts:38-50, types.ts:10-22
+  - DashboardState interface has: iteration, maxIterations, features, promptTemplate
+  - createStateEvent() helper only sends subset of fields
+  - Clients receive incomplete state on connect
+  - Add all DashboardState fields to state events
+
+P2.63 Client Lifecycle Management ► DashboardLive.ts:118-164, specs/dashboard.md:257-280
+  - SSE clients tracked in Set but no graceful cleanup on disconnect
+  - Server shutdown doesn't properly close client connections
+  - Add timeout detection for stale clients
+  - Implement graceful shutdown sequence
+
+P2.64 Duplicate Dashboard Implementations ► server.ts vs DashboardLive.ts
+  - server.ts: 300 lines, full implementation with all endpoints
+  - DashboardLive.ts: 200 lines, partial Effect-based implementation
+  - Both maintain separate state management
+  - Consolidate to single source of truth (prefer Effect-based)
+
+New P3 Items (Jan 2026 - Iteration 15):
+P3.29 JSONL Persistence System ► specs/logging-telemetry.md:59-78
+  - Events should persist to `.ralph/sessions/{session-id}.jsonl`
+  - Enables browser reconnection and history browsing
+  - No file I/O for session logs anywhere in Effect implementation
+  - Prerequisite for /logs/:iteration endpoint
+
+P3.30 Iteration Boundary Markers ► specs/logging-telemetry.md:73-77
+  - JSONL should contain iteration boundary events
+  - Format: `{"type":"iteration_boundary","iteration":N,"timestamp":"..."}`
+  - Allows efficient seeking to specific iteration in log file
+  - Part of LoggingService implementation (P3.28)
+
+New P4 Items (Jan 2026 - Iteration 15):
+P4.30 mapError Boilerplate Reduction ► layers/*.ts (35 occurrences)
+  - Same `.pipe(Effect.mapError((e) => new SomeError({...})))` pattern repeated 35x
+  - Consider: helper function for common error mapping patterns
+  - Or: use Effect.catchAll at layer boundaries instead of per-operation
+  - Low priority but improves maintainability
+
+P4.31 Dashboard Path from Config ► DashboardLive.ts:168, ConfigService
+  - Dashboard static file path hardcoded in start() method
+  - Users can't configure custom dashboard build path
+  - Add dashboardPath to ConfigService and CLI args
+
+New P5 Items (Jan 2026 - Iteration 15):
+P5.47 Test: NDJSON parseNDJSONWithFallback ► ndjson.ts:41-60
+  - Discriminated union return type (json vs text)
+  - Mixed JSON/text stream handling
+  - No dedicated tests despite complex logic
+
+P5.48 Test: NDJSON fromReadableStream ► ndjson.ts:68-79
+  - Converts ReadableStream<Uint8Array> to Stream<string>
+  - Text decoding and chunking logic
+  - Used by ClaudeLive for output streaming
+
+P5.49 Test: NDJSON collectAll ► ndjson.ts:86-89
+  - Collects stream to array
+  - Simple but untested
+
+P5.50 Test: NDJSON forEach ► ndjson.ts:97-101
+  - Side-effect iteration over stream
+  - Callback invocation semantics untested
+
+P5.51 Test: main.ts Entry Point ► main.ts:26-68
+  - CLI argument parsing integration
+  - Layer composition with MainLive
+  - Error handling via catchAll
+  - Currently placeholder but should have test structure
+
+New P6 Items (Jan 2026 - Iteration 15):
+P6.46 Console.log vs Effect Console Inconsistency ► server.ts, ralph.ts
+  - server.ts:299 uses direct console.log
+  - ralph.ts has 100+ console.log calls
+  - Effect code uses Console.error from Effect
+  - No structured logging layer for log level control
+
+P6.47 Empty Catch Blocks Swallow Errors ► server.ts:35-38, DashboardLive.ts:29-34
+  - `catch { clients.delete(client) }` - error info lost
+  - `catch { /* Client disconnected */ }` - no logging
+  - Consider at minimum logging errors before handling
+  - Helps debug production issues
+
+P6.48 .nothrow() Pattern in Legacy Code ► ralph.ts (5 occurrences)
+  - `.quiet().nothrow()` suppresses command output AND errors
+  - Used for: cleanup, PR ready, git push
+  - Error context lost, harder to debug failures
+  - Effect equivalent should preserve error info where possible
+
+P6.49 Dual Implementation Maintenance Burden ► ralph.ts (640 lines) vs src/
+  - Complete working orchestrator in ralph.ts (Bun-based)
+  - Incomplete Effect-based rewrite in src/
+  - Both must be maintained until migration complete
+  - Risk: features added to one, forgotten in other
+
+Iteration 15 Dependency Graph Additions:
+P1.186 Firewall Health ───────────────► P1.2 Firewall Ready Detection (extends)
+P1.187 CI Verification ───────────────► Spec enforcement (new concern)
+P1.188 AbortController ───────────────► P1.5 Signal Handling, P1.16 Stop Button (blocks)
+P1.189 Session Cost ──────────────────► P2.46 Token Data Extraction (extends)
+P1.190 Error Classification ──────────► P1.58 Timeout Error Detection (broader audit)
+P1.191 Exec User Flags ───────────────► P1.21 Container User Switching (same)
+P1.192 Remote URL Clone ──────────────► P1.17 Remote URL Extraction (same)
+P1.193 Plan Mode PR ──────────────────► P1.14 Plan Mode Completion (same)
+P2.62 State Fields ───────────────────► P1.38 Dashboard Broadcast (blocks complete state)
+P2.63 Client Lifecycle ───────────────► P2.18 Dashboard Disconnect (same)
+P2.64 Duplicate Dashboard ────────────► Architecture consolidation
+P3.29 JSONL Persistence ──────────────► P3.28 LoggingService (part of)
+P3.30 Iteration Boundary ─────────────► P3.29 JSONL Persistence (requires)
+P4.30 mapError Reduction ─────────────► Code quality (low priority)
+P4.31 Dashboard Path Config ──────────► P4.28 Volume Mount Paths (similar)
+P5.47-P5.50 NDJSON Tests ─────────────► P5.30-P5.33 (same, renumbered)
+P5.51 main.ts Tests ──────────────────► P5.39 createSession tests (related)
+P6.46 Console Inconsistency ──────────► P3.28 LoggingService (addressed by)
+P6.47 Empty Catch Blocks ─────────────► P1.178 Silent Error Swallow (same)
+P6.48 .nothrow() Pattern ─────────────► P1.83 Error-Tolerant Commands (Effect equivalent)
+P6.49 Dual Implementation ────────────► Migration tracking (meta-item)
 ```
