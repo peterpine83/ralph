@@ -7836,3 +7836,344 @@ The dashboard is also significantly behind the logging-telemetry spec:
 - Phase 5 (Prompt Editing): 0% complete
 
 The firewall has two specific gaps: missing `.packages` IP ranges and missing `*.githubusercontent.com` wildcard - both could cause legitimate GitHub operations to be blocked in production.
+
+---
+
+## Iteration 30 Research (Jan 2026)
+
+### Research Focus
+Comprehensive re-audit with parallel subagents analyzing:
+1. Specs vs implementation comparison (all 8 spec files)
+2. Test coverage gap analysis across all source directories
+3. TODO/FIXME/placeholder search across entire codebase
+4. Architecture compliance verification
+
+### New P1 Items (Critical)
+
+P1.374 main.ts Placeholder Implementation Blocking Production ► src/main.ts:17-58
+  - **CRITICAL**: main.ts is entirely placeholder code
+  - Uses `placeholderContainerName = "ralph-session-placeholder"` (line 30)
+  - Uses `placeholderState` with empty defaults (lines 38-50)
+  - Never calls `createSession()` to create actual container
+  - Effect implementation cannot run actual orchestration
+  - Must: Read features.json, call createSession(), wire to mainLoop
+
+P1.375 LoggingService Spec Entirely Unimplemented ► specs/logging-telemetry.md:48-77
+  - **CRITICAL**: No LoggingService interface exists
+  - No LoggingLive layer implementation
+  - No JSONL persistence to `.ralph/sessions/{session-id}.jsonl`
+  - Missing methods: `appendEvent()`, `getIterationEvents()`, `getSessionPath()`
+  - Required for iteration history, dashboard recovery, debugging
+
+P1.376 Dashboard Log Retrieval Endpoints Missing ► specs/logging-telemetry.md:274-284
+  - **CRITICAL**: No endpoints for log history
+  - Missing: `GET /iterations` - list iterations with metrics
+  - Missing: `GET /logs/:iteration` - JSONL events for specific iteration
+  - Missing: `POST /rerun` - re-run with modified prompt
+  - Required for dashboard iteration sidebar and prompt editing features
+
+P1.377 Iteration Boundary Events Not Emitted ► specs/logging-telemetry.md:73-78
+  - No `iteration_start` event emitted at beginning of each iteration
+  - No `iteration_end` event emitted at completion
+  - JSONL file has no way to identify iteration boundaries
+  - Required: `{"type":"iteration_start","iteration":N,"timestamp":"..."}`
+
+P1.378 Cost Tracking Not Aggregated ► specs/claude-integration.md:211-224
+  - `cost_usd` available in Claude result events but never captured
+  - No cumulative session cost tracking in DashboardState
+  - No cost display in dashboard UI
+  - Users have no visibility into API costs
+
+P1.379 Token Metrics Not Extracted ► specs/logging-telemetry.md:83-101
+  - `usage.input_tokens`, `output_tokens` in ClaudeMessageEvent
+  - Never extracted or displayed in dashboard
+  - IterationMetrics interface doesn't exist (spec line 92-102)
+  - Required for iteration sidebar token count display
+
+P1.380 Step Mode Flag Parsed But Never Used ► src/args.ts:40, src/program.ts
+  - `--step` flag parsed correctly at args.ts:40
+  - Never checked in mainLoop or anywhere in program.ts
+  - spec/orchestrator.md:139-153 defines step mode behavior
+  - Should pause after each iteration, prompt for continue/stop
+
+P1.381 Final Verification Iteration Not Implemented ► specs/orchestrator.md:126-137
+  - When all features pass, should run ONE more verification iteration
+  - Track `finalVerificationDone` flag in state
+  - If Claude makes changes during final verification → reset flag
+  - Current: Loop exits immediately when all features pass
+
+P1.382 Signal Handler Registration Missing ► specs/orchestrator.md:155-166
+  - No SIGINT/SIGTERM handlers in main.ts
+  - First signal should set `stopping = true`, abort Claude
+  - Second signal should force exit
+  - Container cleanup not guaranteed on Ctrl+C
+
+P1.383 cleanupStaleContainers() Not Called ► specs/orchestrator.md:10-21
+  - Function concept exists but never implemented or called
+  - Must run BEFORE createSession() per spec line 15
+  - Use DockerService.listByPrefix("ralph-") to find orphans
+  - Stale containers accumulate across sessions
+
+P1.384 ensureContainerRunning() Not Implemented ► specs/orchestrator.md:28, 62-64
+  - No health check at start of each iteration
+  - If container crashes between iterations, next iteration fails
+  - Should use DockerService.inspect() + auto-restart
+  - Missing from program.ts runIteration()
+
+P1.385 Dashboard Server Not Integrated with Effect Services ► src/server.ts vs src/layers/DashboardLive.ts
+  - Two separate implementations exist
+  - server.ts: Standalone, used by ralph.ts, has all endpoints
+  - DashboardLive.ts: Effect-based, only has SSE endpoint
+  - DashboardLive missing: POST /pause, /resume, /step-mode, /stop
+  - Must migrate server.ts endpoints to DashboardLive or consolidate
+
+P1.386 DashboardLive Initial State Events Incomplete ► DashboardLive.ts:135-140 vs server.ts:136-167
+  - DashboardLive sends only `state` event on SSE connect
+  - server.ts sends THREE events: `state`, `iteration`, `features`
+  - Missing initial events cause stale dashboard display on reconnect
+
+P1.387 IterationSidebar Component Missing ► specs/logging-telemetry.md:79-111
+  - No `dashboard/src/components/IterationSidebar.tsx` exists
+  - Required: Card per iteration with status (✓/✗/●), tokens, context %
+  - Current sidebar shows feature list only (App.tsx:86-91)
+  - Blocking iteration history navigation feature
+
+P1.388 ToolCall Component Missing ► specs/logging-telemetry.md:113-165
+  - No dedicated ToolCall.tsx component
+  - Required: Syntax highlighting, line numbers for Read, expanded by default
+  - Current: Simple JSON.stringify at ActivityLog.tsx:261-285
+  - Poor tool call readability
+
+P1.389 SubagentIndicator Component Missing ► specs/logging-telemetry.md:183-230
+  - No SubagentIndicator.tsx for Task tool tracking
+  - Required: Spinner with elapsed time, prompt text
+  - Task tools rendered same as other tools
+  - No visibility into subagent execution timing
+
+P1.390 useSessionRecovery Hook Missing ► specs/logging-telemetry.md:261-284
+  - No hook to restore state from JSONL on browser reconnect
+  - Browser refresh loses entire activity log
+  - Required: Load /iterations, then /logs/:iteration on mount
+
+P1.391 Syntax Highlighting Library Missing ► specs/logging-telemetry.md:126-138
+  - No prism.js or highlight.js in dashboard/package.json
+  - Code in tool calls hard to read
+  - Required for auto-detect language from file extension
+
+P1.392 Prompt Display Missing from Activity Log ► specs/logging-telemetry.md:170-181
+  - Prompt sent to Claude never shown in dashboard
+  - Required: Prompt at top of activity log for each iteration
+  - `state.promptTemplate` exists but not sent to clients
+
+P1.393 createSession() Has Zero Test Coverage ► src/program.ts:23-200
+  - 178 lines of complex multi-step initialization
+  - Container creation, git clone, permission fixing, branch setup
+  - ALL docker.exec steps completely untested
+  - Error handling paths untested
+
+### New P2 Items (Architecture)
+
+P2.153 Server and DashboardLive Dual Implementation Debt ► src/server.ts, src/layers/DashboardLive.ts
+  - Reinforced from P2.145 - critical tech debt
+  - Two state objects, two SSE implementations
+  - Updates don't sync if both imported
+  - Clear migration path: Move all server.ts to DashboardLive
+
+P2.154 Layer Composition Order Undocumented ► src/layers/index.ts:28-40
+  - MainLive uses Layer.mergeAll and Layer.provideMerge
+  - Implicit dependency order not documented
+  - Hard to understand layer graph
+  - Add JSDoc explaining which layers depend on which
+
+P2.155 Service Interface Files as Types Only ► src/services/*.ts
+  - Interfaces are pure types with no runtime
+  - Consider adding runtime validators via Effect Schema
+  - Contract tests would catch interface drift
+
+P2.156 RALPH_HOME Path Strategy Inconsistent ► ralph.ts:72 vs program.ts:39
+  - ralph.ts: `import.meta.dir` (portable, absolute)
+  - program.ts: `process.cwd()` (fragile, changes with invocation dir)
+  - Template paths break if Ralph invoked from different directory
+
+### New P3 Items (Robustness)
+
+P3.119 Firewall GitHub API Failure No Fallback ► docker/init-firewall.sh
+  - If GitHub meta API down, container startup fails
+  - No bundled fallback IP ranges
+  - Intermittent container startup failures possible
+
+P3.120 NDJSON Large Object Backpressure ► src/streams/ndjson.ts
+  - No tests for extremely large JSON objects
+  - Stream backpressure scenarios untested
+  - Production streams with large events may fail
+
+P3.121 Malformed features.json Error Handling ► src/container.ts:41-44
+  - JSON.parse throws on malformed input
+  - No validation that `parsed.features` is array
+  - Crash mid-iteration if Claude corrupts features.json
+
+P3.122 Branch Name Shell Metacharacters ► src/layers/GitLive.ts
+  - Branch names accepted without sanitization
+  - Special characters cause cryptic git errors
+  - Extends security issues P1.81, P1.118
+
+### New P4 Items (Dashboard/UX)
+
+P4.95 Activity Log Lost on Browser Refresh ► dashboard/src/components/ActivityLog.tsx:24
+  - All events in React component state (in-memory)
+  - Requires useSessionRecovery hook (P1.390) to fix
+  - Poor UX for long sessions
+
+P4.96 No Iteration History Navigation ► dashboard/src/App.tsx
+  - Iteration count shown but not clickable
+  - Can't view past iterations
+  - Requires IterationSidebar (P1.387) and log endpoints (P1.376)
+
+P4.97 Tool Calls Collapsed by Default (Contradicts Spec) ► ActivityLog.tsx:74
+  - Tool calls have `expanded: false`
+  - Spec line 113-124: "display expanded, with collapse button"
+  - Change `expanded: false` to `expanded: true`
+
+### New P5 Items (Consistency)
+
+P5.102 Dashboard IterationData Types Incomplete ► dashboard/src/types.ts:20-24
+  - Missing fields spec requires (tokens, context %)
+  - Server types and dashboard types could drift
+  - Ensure type definitions match
+
+P5.103 Timeout Values Scattered Across Files ► ConfigLive.ts:60, program.ts:244
+  - Config timeout: 5 minutes
+  - Program timeout: 10 minutes
+  - Should consolidate in config
+
+### New P6 Items (Minor)
+
+P6.93 No Syntax Highlighter Package ► dashboard/package.json
+  - Dependency needed for P1.391
+  - Add prism-react-renderer or similar
+
+P6.94 Dashboard dist/ Not Tracked ► dashboard/
+  - Requires build step before first use
+  - First-time setup friction
+  - Either track dist/ or add build to startup
+
+### New P7 Items (Test Coverage)
+
+P7.34 DockerLive Layer Zero Test Coverage ► src/layers/DockerLive.ts (325 lines)
+  - All Docker operations untested
+  - Container creation with capabilities, volumes
+  - exec, readFile, writeFile, inspect
+  - Error mapping from Command to DockerError
+
+P7.35 ClaudeLive Layer Zero Test Coverage ► src/layers/ClaudeLive.ts (138 lines)
+  - CLI argument building untested
+  - Timeout handling untested
+  - runWithEvents() NDJSON parsing untested
+  - Error differentiation (TimeoutError vs ClaudeError)
+
+P7.36 GitLive Layer Zero Test Coverage ► src/layers/GitLive.ts (141 lines)
+  - hasUnpushedCommits() logic untested
+  - Branch operations untested
+  - Push with --set-upstream untested
+  - Error scenarios untested
+
+P7.37 ConfigLive Layer Zero Test Coverage ► src/layers/ConfigLive.ts (68 lines)
+  - Required env var validation untested
+  - Git root detection untested
+  - ConfigError creation untested
+
+P7.38 DashboardLive Layer Zero Test Coverage ► src/layers/DashboardLive.ts (217 lines)
+  - SSE server lifecycle untested
+  - State broadcasting untested
+  - Client tracking untested
+  - Ref state updates untested
+
+P7.39 Server HTTP Endpoints Zero Test Coverage ► src/server.ts (301 lines)
+  - /events, /pause, /resume, /step-mode, /stop, /prompt untested
+  - Static file serving untested
+  - CORS handling untested
+
+P7.40 main.ts Entry Point Zero Test Coverage ► src/main.ts (69 lines)
+  - CLI arg parsing integration untested
+  - BunRuntime.runMain execution untested
+  - Error handling with catchAll untested
+
+P7.41 parseNDJSONWithFallback Not Tested ► src/streams/ndjson.ts:41-60
+  - parseNDJSON tested thoroughly
+  - parseNDJSONWithFallback() completely untested
+  - Mixed JSON/text handling untested
+
+P7.42 fromReadableStream Not Tested ► src/streams/ndjson.ts:68-79
+  - WHATWG stream conversion untested
+  - Critical for browser compatibility
+
+P7.43 collectAll and forEach Not Tested ► src/streams/ndjson.ts:86-101
+  - Stream collection utilities untested
+  - Side effect stream consumption untested
+
+P7.44 Firewall Script Integration Tests Missing ► docker/init-firewall.sh (168 lines)
+  - DNS rule extraction untested
+  - GitHub IP fetching untested
+  - Domain resolution untested
+  - Verification tests exist in script but no automated validation
+
+P7.45 Entrypoint Script Integration Tests Missing ► docker/entrypoint.sh
+  - SSH key setup untested
+  - Git credential helper setup untested
+  - Privilege dropping untested
+
+P7.46 Dashboard Components Zero Test Coverage ► dashboard/src/components/
+  - ActivityLog.tsx - event processing untested
+  - Controls.tsx - button state management untested
+  - FeatureList.tsx - rendering untested
+  - No React testing library setup
+
+---
+
+Iteration 30 Dependency Graph:
+P1.374 main.ts placeholder ────────────► Blocks all Effect-based execution
+P1.375-377 Logging spec ───────────────► Dashboard persistence, recovery
+P1.378-379 Metrics ────────────────────► Visibility, debugging
+P1.380-384 Orchestrator spec ──────────► Core workflow completeness
+P1.385-386 Dashboard integration ──────► UI functionality
+P1.387-392 Dashboard components ───────► User experience
+P1.393 createSession tests ────────────► Quality assurance
+
+P2.153-156 Architecture ───────────────► Code quality, maintainability
+P3.119-122 Robustness ─────────────────► Reliability
+P4.95-97 UX Polish ────────────────────► User experience
+P5.102-103 Consistency ────────────────► Maintainability
+P6.93-94 Dependencies ─────────────────► Build/setup
+P7.34-46 Test Coverage ────────────────► Quality assurance (critical)
+
+Summary (Iteration 30):
+- 20 new P1 items (P1.374-P1.393) - main.ts placeholder, logging spec, dashboard
+- 4 new P2 items (P2.153-P2.156) - Architecture consolidation
+- 4 new P3 items (P3.119-P3.122) - Robustness improvements
+- 3 new P4 items (P4.95-P4.97) - UX polish
+- 2 new P5 items (P5.102-P5.103) - Consistency issues
+- 2 new P6 items (P6.93-P6.94) - Dependencies
+- 13 new P7 items (P7.34-P7.46) - Test coverage
+- Total new items: 48
+
+Running totals:
+- P1 items: 393 (was 373)
+- P2 items: 156 (was 152)
+- P3 items: 122 (was 118)
+- P4 items: 97 (was 94)
+- P5 items: 103 (was 101)
+- P6 items: 94 (was 92)
+- P7 items: 46 (was 33)
+- Grand total: 1011 items (was 963)
+
+### Iteration 30 Key Insight
+
+The most critical finding is that **main.ts is entirely placeholder code** (P1.374). The Effect-based implementation cannot actually orchestrate anything - it uses hardcoded placeholder values instead of calling `createSession()`. This means:
+
+1. The working orchestrator is `ralph.ts` (Bun shell script approach)
+2. The Effect-based rewrite in `src/` is incomplete and non-functional
+3. Priority should be completing main.ts integration before adding new features
+
+Additionally, the **logging-telemetry spec is 0% implemented** (P1.375-377, P1.387-392). This represents approximately 15-20 tasks that would be a major feature milestone. The dashboard exists but has none of the advanced features specified.
+
+Test coverage remains critically low at approximately **30%**, with all five Live layer implementations completely untested. These layers contain the actual Docker, Git, Claude, and Dashboard operations - the riskiest code in the system.
