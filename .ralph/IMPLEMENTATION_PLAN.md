@@ -283,6 +283,42 @@
   - Provides immediate next action for user
   - Only show when PR exists (after successful orchestration)
 
+### 1.36 ANTHROPIC_API_KEY Fallback Support
+- [ ] Support ANTHROPIC_API_KEY as fallback to CLAUDE_CODE_OAUTH_TOKEN (refs: ralph.ts:358-361, ConfigLive.ts:35-42)
+  - Check: `!CLAUDE_CODE_OAUTH_TOKEN && !ANTHROPIC_API_KEY` → error
+  - Pass both tokens to container environment (ralph.ts:170-171)
+  - Update ConfigLive.ts validation logic (currently only checks OAuth token)
+  - Error message: "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY"
+
+### 1.37 Keep-Alive Command Consistency
+- [ ] Reconcile keep-alive command between implementations (refs: ralph.ts:177, DockerLive.ts:80-81, specs/container.md:70)
+  - DockerLive.ts uses `tail -f /dev/null` (matches spec)
+  - ralph.ts uses `sleep infinity` (divergent)
+  - Both work but should be consistent
+  - Recommendation: Update ralph.ts to match spec (`tail -f /dev/null`)
+
+### 1.38 Container Cleanup Try-Finally Pattern
+- [ ] Implement try-finally cleanup in main.ts (refs: ralph.ts:164-231)
+  - Currently no cleanup block in main.ts
+  - Add finally block with `DockerService.remove(containerName)`
+  - Cleanup should run even on error/signal
+  - Use `Effect.ensuring()` or `Effect.acquireRelease()` pattern
+
+### 1.39 Features.json Validation on Startup
+- [ ] Validate features.json existence and format before container creation (refs: ralph.ts:371-379, specs/orchestrator.md:16)
+  - Check file exists: `Bun.file(featuresPath).exists()`
+  - Parse JSON and validate structure
+  - Fail fast with clear error if invalid
+  - Only required in build mode (not plan mode)
+  - ConfigLive.ts currently does not validate this
+
+### 1.40 Pass Args to mainLoop for Loop Control
+- [ ] Thread RalphArgs through mainLoop (refs: src/program.ts:283-297, src/args.ts)
+  - Current mainLoop signature: `(params: { containerName, prompt })`
+  - Needed for: `args.once`, `args.maxIterations`
+  - Update signature to include args or individual flags
+  - Wire to loop condition at lines 295-297
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -490,6 +526,14 @@
 - No CLI flag to override model selection
 - Consistent with specs but worth noting for future flexibility
 
+### Environment Validation Differences (ConfigLive vs ralph.ts)
+- **ConfigLive.ts** validates only `CLAUDE_CODE_OAUTH_TOKEN` (required)
+- **ralph.ts** accepts either `CLAUDE_CODE_OAUTH_TOKEN` OR `ANTHROPIC_API_KEY`
+- **Spec** (orchestrator.md:199-202) documents only OAuth token as required
+- **ConfigLive.ts** falls back to empty string for missing GITHUB_TOKEN
+- **ralph.ts** auto-detects GITHUB_TOKEN via `gh auth token` command
+- Both approaches need reconciliation
+
 ### Missing Test Coverage Areas
 - 0% coverage on service layer implementations (~931 lines total):
   - DockerLive.ts: 324 lines
@@ -627,7 +671,7 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 35 items | Blocking basic functionality |
+| P1 | Critical Integration | 40 items | Blocking basic functionality |
 | P2 | Dashboard Integration | 6 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
 | P4 | Robustness | 3 items | Production readiness |
@@ -637,9 +681,13 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ```
 P1.9 Startup Cleanup ─────► P1.1 Main Entry Point (cleanup runs FIRST)
                                   │
-P1.6 Environment Validation ──────┤
+P1.6 Environment Validation ──────┼─► P1.36 ANTHROPIC_API_KEY Fallback
                                   │
-P1.29 Create+Start Pattern ───────┤
+P1.39 Features.json Validation ───┤ (build mode only)
+                                  │
+P1.29 Create+Start Pattern ───────┼─► P1.37 Keep-Alive Command Consistency
+                                  │
+P1.38 Try-Finally Cleanup ────────┤
                                   │
                                   ├─► P1.23 Git Configuration in Container
                                   │         │
@@ -687,9 +735,9 @@ P1.29 Create+Start Pattern ───────┤
                                   │         │
                                   │         └─► P1.16 AbortController Pattern
                                   │
-                                  ├─► P1.7 --once Flag Handling
+                                  ├─► P1.7 --once Flag Handling ◄── P1.40 Pass Args to mainLoop
                                   │
-                                  ├─► P1.8 maxIterations Enforcement
+                                  ├─► P1.8 maxIterations Enforcement ◄── P1.40
                                   │         │
                                   │         └─► P1.22 Circuit Breaker Timeout Handling
                                   │
