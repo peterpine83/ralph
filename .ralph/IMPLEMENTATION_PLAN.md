@@ -37,9 +37,11 @@
 ### 1.1 Main Entry Point Integration
 - [ ] Wire createSession() to main.ts (refs: src/main.ts:17-58, src/program.ts:23-200)
   - Currently uses placeholder values instead of actual session creation
-  - Production flow: parseArgs → createSession → mainLoop
+  - Production flow: parseArgs → validateEnvironment → createSession → mainLoop → cleanup
   - Remove hardcoded `placeholderContainerName`, `placeholderPrompt`, `placeholderState`
   - Fix type annotation at line 67 (`as Effect.Effect<void, never, never>`)
+  - Add cleanup in finally block (container removal via DockerService.remove())
+  - Implement proper error handling with catchTags for fatal vs recoverable errors
 
 ### 1.2 Firewall Ready Detection
 - [ ] Replace 3-second sleep with log streaming detection (refs: src/program.ts:74, docker/entrypoint.sh)
@@ -74,6 +76,12 @@
   - `GITHUB_TOKEN` - Auto-detect via `gh auth token` if not set
   - Validate before starting container to fail fast
   - Clear error messages for missing credentials
+
+### 1.7 --once Flag Handling
+- [ ] Implement single-iteration mode (refs: src/args.ts:26, src/program.ts:283-335)
+  - `--once` flag parsed but not wired to mainLoop
+  - When enabled, run exactly one iteration then exit
+  - Should still respect circuit breaker and cleanup
 
 ---
 
@@ -247,6 +255,16 @@
 - Pattern available but not wired to main.ts branch creation
 - Container naming uses `ralph-session-{timestamp}` pattern
 
+### CLI Args Parsed but Not Used
+- `--once` flag parsed at src/args.ts:26 but not checked in mainLoop
+- `stepMode` parsed but not integrated with iteration pause logic
+- `maxIterations` parsed but mainLoop doesn't respect it (uses circuit breaker instead)
+
+### Model Always Hardcoded to Opus
+- ClaudeLive.ts lines 27 and 76 always use `claude-opus-4-5-20251101`
+- No CLI flag to override model selection
+- Consistent with specs but worth noting for future flexibility
+
 ### Missing Test Coverage Areas
 - 0% coverage on service layer implementations (DockerLive, ClaudeLive, GitLive)
 - 0% coverage on createSession() function
@@ -288,8 +306,31 @@ Per specs/features.md, Claude must run full CI suite (typecheck, tests, build) b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 6 items | Blocking basic functionality |
+| P1 | Critical Integration | 7 items | Blocking basic functionality |
 | P2 | Dashboard Integration | 4 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
 | P4 | Robustness | 5 items | Production readiness |
 | P5 | Test Coverage | 4 items | Quality assurance |
+
+### Dependency Graph
+```
+P1.1 Main Entry Point ─────┬─► P1.5 Signal Handling
+     │                      │
+     ├─► P1.2 Firewall Ready Detection
+     │
+     ├─► P1.3 copyToContainer (optional, for bulk ops)
+     │
+     ├─► P1.4 Final Verification Logic
+     │
+     ├─► P1.6 Environment Validation
+     │
+     └─► P1.7 --once Flag Handling
+
+P2.* Dashboard ────────────► Requires P1.1 complete first
+
+P3.* Logging ──────────────► Can proceed in parallel with P2
+
+P4.* Robustness ───────────► After P1-P3 complete
+
+P5.* Testing ──────────────► After each priority phase
+```
