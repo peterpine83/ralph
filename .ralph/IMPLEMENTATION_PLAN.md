@@ -31,6 +31,20 @@
 - [x] Argument parsing (--branch, --once, --max-iterations, --dashboard, --dashboard-port, --step, --mode)
 - [x] Planning mode support (--mode plan)
 
+### Git Configuration in Container (P1.23, P1.26 - VERIFIED COMPLETE)
+- [x] Git safe.directory configured with --system flag (src/program.ts:122-135)
+- [x] Credential helper configured with --system flag (src/program.ts:137-151)
+- [x] SSH command configured with --system flag (src/program.ts:153-167)
+
+### Clone via Temp Directory (P1.28 - VERIFIED COMPLETE)
+- [x] Clone to /tmp/repo intermediate directory (src/program.ts:79-92)
+- [x] Copy to /workspace/ (src/program.ts:94-105)
+- [x] Chown to node:node (src/program.ts:107-118)
+
+### Keep-Alive Command (P1.37 - VERIFIED COMPLETE)
+- [x] Uses `tail -f /dev/null` per spec (DockerLive.ts:81)
+- [x] Note: ralph.ts uses `sleep infinity` (divergent but both work)
+
 ---
 
 ## Priority 1: Critical Integration Gaps
@@ -861,6 +875,176 @@
 
 ---
 
+## Priority 6: Dashboard & Streaming Integration Gaps
+
+### 6.1 Claude Event Streaming to Dashboard
+- [ ] Wire ClaudeService.runWithEvents() output to DashboardService.broadcast() (refs: ralph.ts:284-301)
+  - program.ts:303-306 calls runIteration() but doesn't capture event stream
+  - Each ClaudeEvent from stream should be broadcast to SSE clients
+  - Required for real-time progress display in dashboard
+
+### 6.2 Output vs Claude Event Distinction
+- [ ] Handle dual event types in dashboard streaming (refs: ralph.ts:282-302)
+  - Stdout: Attempt JSON parse as ClaudeEvent, fallback to raw text via sendOutput()
+  - Stderr: Always send as raw text via sendOutput()
+  - Current DashboardService has generic broadcast() with no distinction
+
+### 6.3 NDJSON Parse Error Handling in Stream
+- [ ] Ensure JSON parse errors are non-fatal in stream processing (refs: ralph.ts:283-289)
+  - Wrap JSON.parse in try-catch for each line
+  - On parse failure, emit fallback event (raw text)
+  - Stream should not fail on invalid NDJSON
+
+### 6.4 Dashboard State Cleanup on Session End
+- [ ] Update dashboard state on session termination (refs: ralph.ts:630-631)
+  - Call `updateState({ running: false })` in finally block
+  - Ensure server shutdown and state cleanup on session end
+  - Wire DashboardService.stop() to main.ts cleanup
+
+### 6.5 Separate Stderr Streaming
+- [ ] Handle stderr stream separately from stdout (refs: ralph.ts:306-316)
+  - streamStderr pipes stderr directly to sendOutput()
+  - Current ClaudeService.runWithEvents() returns combined stream
+  - Need to handle stderr in addition to stdout event stream
+
+### 6.6 Stream Buffer Management Verification
+- [ ] Verify buffer management for incomplete lines (refs: ralph.ts:268-302)
+  - Streams operate on chunks, not line boundaries
+  - Verify parseNDJSON handles partial JSON across chunks
+  - Split on `\n`, keep incomplete line in buffer for next chunk
+
+### 6.7 Docker Exec User Flag Consistency
+- [ ] Document and enforce user flag patterns (refs: ralph.ts:208, 211, 215)
+  - Git operations: Always use `-u node` flag
+  - Chown/file operations: Use root (no -u flag)
+  - Feature file read: `-u node`
+  - DockerLive.exec() has optional user param but callers must remember
+
+### 6.8 Docker Logs Polling Implementation
+- [ ] Implement actual polling loop for firewall detection (refs: ralph.ts:186-188)
+  - Current program.ts:74-75 just does `Effect.sleep("3 seconds")` hardcoded
+  - Need polling loop with `docker logs` check every 1 second
+  - Max 30 iterations before timeout
+  - Extends P1.2 with concrete implementation details
+
+### 6.9 Docker PS Filtering Fix (CRITICAL)
+- [ ] Fix DockerService.listByPrefix() to search Docker daemon (refs: ralph.ts:137)
+  - Current DockerLive:292-318 searches `/workspace` filesystem
+  - Should use `docker ps -a --filter name=ralph-session --format "{{.Names}}"`
+  - Fundamental mismatch for stale container cleanup (P1.9)
+
+### 6.10 Remote Branch Verification Integration
+- [ ] Wire branch verification to main.ts startup (refs: ralph.ts:388-396)
+  - P1.31 describes pattern, but no integration point in main.ts
+  - Should fail immediately if user specifies invalid resume branch
+  - Run before expensive container creation
+
+### 6.11 Clone Branch Selection in Program
+- [ ] Implement branch selection logic in clone command (refs: ralph.ts:202)
+  - Pattern: `const cloneBranch = isResume ? branch : "trunk"`
+  - Current program.ts:82 hardcodes gitRoot as clone URL
+  - Need to clone from remote URL with correct branch
+
+### 6.12 Git Push -u Flag Verification
+- [ ] Verify setUpstream option translates to -u flag (refs: ralph.ts:558)
+  - GitLive.ts:58-75 has push() with setUpstream option
+  - program.ts:258 uses `.push({ setUpstream: true })`
+  - Need to verify this produces correct `git push -u origin HEAD` command
+
+### 6.13 Unpushed Detection for New Branches
+- [ ] Handle case where remote branch doesn't exist (refs: ralph.ts:542-553)
+  - If remote exists: `git log origin/${branch}..HEAD`
+  - If remote doesn't exist: Any local commits = unpushed
+  - Extends P1.61 with specific implementation guidance
+
+### 6.14 Features.json Error Tolerance in Dashboard
+- [ ] Continue orchestration on JSON parse error (refs: ralph.ts:474-480)
+  - Wrap JSON parse in try-catch, continue on error
+  - Dashboard should gracefully degrade if JSON invalid
+  - Log error but don't halt automation
+
+### 6.15 Features.json Write Integration
+- [ ] Wire features.json copying to createSession (refs: ralph.ts:217-227)
+  - Read from local filesystem
+  - Create .ralph directory in container
+  - Write via heredoc or DockerService.writeFile()
+  - Currently not integrated in createSession()
+
+### 6.16 Plan Mode Completion Detection Integration
+- [ ] Add plan mode exit logic to mainLoop (refs: ralph.ts:614-626)
+  - Check: PR exists AND no unpushed commits
+  - If both true, Claude signals completion → exit gracefully
+  - Different from build mode completion
+
+### 6.17 Plan Mode Iteration Display
+- [ ] Show plan-specific status in dashboard (refs: ralph.ts:500-503)
+  - "Running planning analysis..." instead of feature count
+  - Reports maxIterations: 1 to dashboard
+  - Reports remaining: 0 (no features in plan mode)
+
+### 6.18 Second Signal Force Exit
+- [ ] Implement double-signal force exit (refs: ralph.ts:85-91)
+  - First SIGINT → graceful shutdown (set stopping flag)
+  - Second SIGINT → force exit immediately (process.exit)
+  - Track `shutdownRequested` flag for detection
+
+### 6.19 Bell Character on Circuit Breaker
+- [ ] Emit terminal bell when circuit breaker triggers (refs: ralph.ts:534)
+  - Output `\x07` character to alert user
+  - Useful for attention when running in background
+  - Minor UX improvement
+
+### 6.20 1-Hour Safety Timeout Clarification
+- [ ] Update timeout strategy per ralph.ts (refs: ralph.ts:46)
+  - ralph.ts uses 1 hour: "safety fallback (Claude Code handles its own timeouts)"
+  - Current program.ts:244 uses 10 minutes
+  - Should use 1 hour for outer timeout, Claude handles inner timeouts
+
+### 6.21 Polling Interval for Firewall
+- [ ] Define polling interval in firewall detection (refs: ralph.ts:185-188)
+  - Poll every 1 second (Bun.sleep(1000))
+  - Max 30 iterations
+  - Concrete implementation for P1.27
+
+### 6.22 Entrypoint vs Keep-Alive Separation
+- [ ] Document entrypoint lifecycle (refs: ralph.ts:179)
+  - Entrypoint.sh runs once, then keep-alive takes over
+  - Entrypoint must complete, not run indefinitely
+  - Affects firewall ready detection timing
+
+### 6.23 mainLoop Parameter Threading Enhancement
+- [ ] Expand mainLoop signature for full control (refs: extends P1.40)
+  - Current: `{ containerName, prompt }`
+  - Needs: args (once, maxIterations), mode (plan vs build), initialState
+  - More comprehensive than P1.40 scope
+
+### 6.24 Volume Mount .gitconfig Missing
+- [ ] Add .gitconfig volume mount (refs: ralph.ts:167-169)
+  - Missing from program.ts:36-40
+  - Add: `${process.env.HOME}/.gitconfig:/home/node/.gitconfig:ro`
+  - Required for git config to work without --system
+
+### 6.25 Home vs Node User Path Mapping
+- [ ] Document volume mount path mapping (refs: ralph.ts volume mounts)
+  - Host ~/.ssh → container /root/.ssh (for root ops)
+  - Host ~/.claude → container /home/node/.claude (for node user)
+  - Need to handle both root and node user contexts
+
+### 6.26 Prompt Template File Read
+- [ ] Implement template file reading (refs: ralph.ts:407-409)
+  - Read template from RALPH_HOME/templates/ directory
+  - Select based on mode (plan vs build)
+  - Current main.ts:34-35 has placeholder paths only
+
+### 6.27 Three Iteration Limits Coordination
+- [ ] Coordinate three separate iteration controls (refs: ralph.ts)
+  - `maxIterations` from CLI args
+  - `MAX_NO_CHANGE = 3` circuit breaker constant
+  - `finalVerificationDone` extra iteration flag
+  - All three must be checked in correct order
+
+---
+
 ## Discoveries
 
 ### Existing Utilities (src/lib equivalent)
@@ -1059,16 +1243,19 @@ There is NO `dependencies` field in the spec. P1.47 was updated to reflect this.
   - Affects: src/layers/DockerLive.ts:206-219
   - Mitigated by: Commands come from trusted internal sources
 
-### Implementation Completeness Update (Jan 2026)
-Based on extended gap analysis:
-- **Effect implementation is ~35-40% complete** (revised down from 40-50%)
-- **P1 items: 63** (increased from 48)
-- **P2 items: 16** (increased from 10)
-- **P3 items: 15** (increased from 9)
-- **P4 items: 10** (increased from 6)
-- **P5 items: 12** (increased from 9)
-- **Total items: 116** (increased from 82)
-- Security issues now tracked (P1.49, P1.62)
+### Implementation Completeness Update (Jan 2026 - Iteration 2)
+Based on extended gap analysis and verification of implemented items:
+- **Effect implementation is ~35-40% complete**
+- **Verified complete**: P1.23, P1.26, P1.28, P1.37 (git config, clone pattern, keep-alive)
+- **P1 items: 60** (63 - 3 verified complete)
+- **P2 items: 16**
+- **P3 items: 15**
+- **P4 items: 10**
+- **P5 items: 12**
+- **P6 items: 27** (NEW - dashboard & streaming integration)
+- **Total items: 140** (116 + 27 new - 3 verified complete)
+- Security issues tracked: P1.49 (CRITICAL), P1.62 (cap-drop)
+- Critical fix needed: P6.9 (listByPrefix searches filesystem, not Docker daemon)
 
 ### Items Already Implemented in Entrypoint/Firewall
 The following are implemented in docker/entrypoint.sh and docker/init-firewall.sh:
@@ -1148,15 +1335,21 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary
+### Priority Summary (Updated Jan 2026 - Iteration 2)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 63 items | Blocking basic functionality (includes 1 CRITICAL security) |
+| P1 | Critical Integration | 60 items | Blocking basic functionality (includes 1 CRITICAL security, 3 verified complete) |
 | P2 | Dashboard Integration | 16 items | Core UX features |
 | P3 | Missing Functionality | 15 items | Logging/telemetry subsystem + streaming |
 | P4 | Robustness | 10 items | Production readiness |
 | P5 | Test Coverage | 12 items | Quality assurance |
-| **Total** | | **116 items** | |
+| P6 | Dashboard & Streaming Integration | 27 items | NEW: Event streaming, state sync, lifecycle |
+| **Total** | | **140 items** | ~35-40% complete |
+
+**Key Findings This Iteration**:
+- P6.9 is CRITICAL: DockerService.listByPrefix() searches filesystem not Docker daemon
+- P1.23, P1.26, P1.28, P1.37 verified complete (git config, clone pattern, keep-alive)
+- 27 new gaps identified primarily in dashboard/streaming integration
 
 ### Dependency Graph
 ```
@@ -1327,4 +1520,33 @@ P5 New Dependencies:
 P5.10 Command Injection Tests ► P1.49 Command Injection Fix
 P5.11 Error Recovery Tests ──► P1.53 Iteration Error Recovery
 P5.12 Volume Mount Tests ───► P1.50 HOME Validation
+
+P6 New Dependencies (Jan 2026 - Iteration 2):
+P6.1 Event Streaming ─────────► P3.1 ClaudeService.runWithEvents
+P6.2 Output vs Event ─────────► P6.1 Event Streaming
+P6.3 NDJSON Error Handling ───► P6.2 Output vs Event
+P6.4 Dashboard Cleanup ───────► P1.38 Try-Finally Cleanup
+P6.5 Stderr Streaming ────────► P6.1 Event Streaming
+P6.6 Buffer Management ───────► P6.3 NDJSON Error Handling
+P6.7 Exec User Flag ──────────► P1.21 Container User Switching
+P6.8 Logs Polling ────────────► P1.2 Firewall Ready Detection
+P6.9 Docker PS Fix ───────────► P1.9 Startup Cleanup (CRITICAL - blocks cleanup)
+P6.10 Branch Verification ────► P1.31 Host-Side Branch Verification
+P6.11 Clone Branch Selection ─► P1.18 Clone Branch Selection
+P6.12 Push -u Verification ───► P1.19 Unpushed Detection
+P6.13 New Branch Detection ───► P1.61 GitLive Dual-Path
+P6.14 Features Error Tolerance ► P4.6 JSONL Parse Tolerance
+P6.15 Features Write ─────────► P1.12 Features.json Copying
+P6.16 Plan Mode Exit ─────────► P1.14 Plan Mode Completion
+P6.17 Plan Mode Display ──────► P2.6 Plan Mode Iteration Reporting
+P6.18 Second Signal ──────────► P1.5 Signal Handling
+P6.19 Bell Character ─────────► P1.22 Circuit Breaker Timeout
+P6.20 1-Hour Timeout ─────────► P1.57 1-Hour Safety Timeout
+P6.21 Polling Interval ───────► P6.8 Logs Polling
+P6.22 Entrypoint Lifecycle ───► Documentation (standalone)
+P6.23 mainLoop Parameters ────► P1.40 Pass Args to mainLoop
+P6.24 Volume Mount .gitconfig ─► P1.55 Volume Mount Paths
+P6.25 Path Mapping ───────────► P6.24 Volume Mount .gitconfig
+P6.26 Template File Read ─────► P1.15 Prompt Template Workflow
+P6.27 Three Iteration Limits ─► P1.8 maxIterations Enforcement
 ```
