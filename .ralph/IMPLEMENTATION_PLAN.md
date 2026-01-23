@@ -374,6 +374,114 @@
   - Don't create container for empty work
   - Different from missing file (that's an error)
 
+### 1.49 Command Injection Protection in ClaudeLive (SECURITY)
+- [ ] Escape prompt strings before shell execution (refs: src/layers/ClaudeLive.ts:41, 89)
+  - **CRITICAL SECURITY**: Prompt wrapped in double quotes but not escaped
+  - Characters like `"`, `$`, backticks could break out and execute arbitrary commands
+  - Example attack: `prompt: 'test"; rm -rf /workspace; echo "'`
+  - Solution: Use array-based command execution instead of shell string, or escape special chars
+  - Affects both `run()` (line 41) and `runWithEvents()` (line 89)
+
+### 1.50 process.env.HOME Validation
+- [ ] Validate HOME environment variable before volume mount interpolation (refs: src/program.ts:37-39)
+  - If `HOME` undefined, volume mount becomes `undefined/.ssh:/root/.ssh:ro`
+  - Causes cryptic Docker creation failure
+  - Check `process.env.HOME` exists before creating container
+  - Fail fast with clear error: "ERROR: HOME environment variable not set"
+
+### 1.51 CLI Numeric Argument Validation
+- [ ] Validate parseInt results for numeric CLI args (refs: src/args.ts:36, 43)
+  - `--max-iterations abc` causes `parseInt` to return `NaN`
+  - Loop condition `state.iteration < NaN` is always false → infinite loop
+  - Same issue with `--dashboard-port`
+  - Add `isNaN()` check and exit with error for invalid numbers
+
+### 1.52 getRemainingFeatures Error Handling
+- [ ] Wrap getRemainingFeatures in try-catch (refs: src/container.ts:41-44, src/program.ts:237)
+  - `JSON.parse()` throws on malformed input
+  - No validation that `parsed.features` exists or is an array
+  - Crash mid-iteration if features.json corrupted by Claude
+  - Return Effect with FeatureError instead of bare values
+
+### 1.53 mainLoop Iteration Error Recovery
+- [ ] Handle iteration errors without terminating orchestration (refs: src/program.ts:300-319)
+  - Currently any error in `runIteration()` terminates entire orchestration
+  - Should catch errors, increment noChangeCount for circuit breaker
+  - Emit terminal bell (`\x07`) on failure
+  - Continue to next iteration (up to circuit breaker threshold)
+  - Pattern from ralph.ts: timeout/failures count toward circuit breaker, don't halt
+
+### 1.54 createSession Cleanup on Failure
+- [ ] Add cleanup for partial session creation failures (refs: src/program.ts:23-200)
+  - If git clone fails after container created, container is orphaned
+  - Wrap in `Effect.acquireRelease()` or `Effect.ensuring()`
+  - Cleanup should remove container on any failure in session setup
+  - Extends P1.38 but applies within createSession, not just main.ts
+
+### 1.55 Volume Mount Path Corrections
+- [ ] Fix volume mount paths and permissions (refs: ralph.ts:167-169 vs program.ts:36-40)
+  - SSH: ralph.ts uses `/home/node/.ssh`, program.ts uses `/root/.ssh`
+  - Claude dir: ralph.ts uses `:rw` (read-write), program.ts uses `:ro` (read-only)
+  - Missing `.gitconfig` mount entirely
+  - `.claude` needs write access for session state storage
+  - Add: `${process.env.HOME}/.gitconfig:/home/node/.gitconfig:ro`
+
+### 1.56 RALPH_HOME Path Resolution
+- [ ] Use import.meta.dir for path resolution (refs: ralph.ts:72, 408, 413)
+  - ralph.ts uses `import.meta.dir` for relative paths
+  - program.ts uses `process.cwd()` which fails if invoked from different directory
+  - Templates and dashboard files must be found relative to script location
+  - Pass `RALPH_HOME` to functions that need to resolve paths
+
+### 1.57 One-Hour Safety Timeout
+- [ ] Update Claude timeout to 1 hour safety fallback (refs: ralph.ts:46)
+  - Current: 10 minutes (program.ts:244)
+  - ralph.ts uses 1 hour: "safety fallback (Claude Code handles its own timeouts)"
+  - Claude's internal timeouts handle normal cases
+  - 1 hour prevents premature kills on complex operations
+
+### 1.58 Timeout Error Detection Fix
+- [ ] Fix timeout error tag detection in ClaudeLive (refs: src/layers/ClaudeLive.ts:52-58)
+  - Code checks `e._tag === "TimeoutException"`
+  - Effect's timeout may use different tag structure
+  - Verify actual timeout error tag via testing
+  - Update detection logic to match Effect's actual behavior
+
+### 1.59 Exec Exit Code Verification
+- [ ] Verify command exit codes in docker exec calls (refs: src/program.ts:79-196)
+  - Docker exec returns stdout even on command failure
+  - Current code assumes success if no exception thrown
+  - Silent failures leave container in invalid state
+  - Add exit code checking or use `Effect.filterOrFail`
+
+### 1.60 DashboardError TaggedError Definition
+- [ ] Define DashboardError as Data.TaggedError (refs: src/services/Dashboard.ts:4-8)
+  - Currently only interface definition exists
+  - Not in `/workspace/src/errors/index.ts`
+  - Cannot use with `Effect.catchTag()` pattern
+  - Add to errors module for consistency with other error types
+
+### 1.61 GitLive Dual-Path Implementation
+- [ ] Implement dual-path unpushed detection in GitLive layer (refs: src/layers/GitLive.ts:77-110)
+  - P1.19 describes host-side pattern from ralph.ts
+  - GitLive.hasUnpushedCommits() needs same dual-path logic
+  - If remote branch doesn't exist: return true (new branch = has commits)
+  - If remote exists: use standard `git log origin/${branch}..HEAD`
+
+### 1.62 Cap-Drop ALL Security Pattern
+- [ ] Add --cap-drop=ALL to container creation (refs: src/layers/DockerLive.ts:49-54)
+  - P1.44 identifies requirement but current code only has --cap-add
+  - Security best practice: drop all capabilities first
+  - Then explicitly add only NET_ADMIN
+  - Update DockerLive.create() to include `--cap-drop=ALL`
+
+### 1.63 Template Naming Convention
+- [ ] Use correct template file names (refs: ralph.ts:407)
+  - Plan mode: `ralph-plan-mode.md`
+  - Build mode: `ralph-instructions.md`
+  - These are exact filenames expected in `templates/` directory
+  - Wire to mode selection in createSession
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -446,6 +554,49 @@
   - If missing, warn: "WARNING: ~/.ssh not found - git operations may fail"
   - Continue (not fatal) as SSH might not be needed
 
+### 2.11 DashboardLive Error Type Alignment
+- [ ] Fix DashboardLive methods to return correct error type (refs: src/layers/DashboardLive.ts)
+  - All methods return `Effect.Effect<T, never>` but interface declares `Effect.Effect<T, DashboardError>`
+  - Methods using `Ref.get/update` cannot fail with DashboardError
+  - Either change interface to `never` or add error mapping
+  - Affects: getState, updateState, setPaused, setRunning, etc. (14+ methods)
+
+### 2.12 Effect.runSync Usage in DashboardLive
+- [ ] Remove Effect.runSync from Bun.serve callbacks (refs: src/layers/DashboardLive.ts:127-133, 136, 145-151)
+  - Uses synchronous Effect execution inside async fetch handlers
+  - Breaks Effect execution model - errors throw instead of being handled
+  - Refactor to use proper async Effect execution or store reference to runtime
+
+### 2.13 Stale SSE Client Cleanup
+- [ ] Implement cleanup mechanism for disconnected SSE clients (refs: src/layers/DashboardLive.ts:28-34)
+  - Comment says "will be removed on next cleanup" but no cleanup exists
+  - Failed clients accumulate in clientsRef Set
+  - Causes exceptions on every broadcast
+  - Add periodic cleanup or track failures and remove after threshold
+
+### 2.14 Dashboard State Initialization Sequence
+- [ ] Document and implement correct dashboard init sequence (refs: ralph.ts:412-423)
+  - 1. `startDashboardServer(port, path)` - Start HTTP server
+  - 2. `setOnStopCallback(abortClaude)` - Wire stop button
+  - 3. `setPromptTemplate(instructions)` - Set template state
+  - 4. `setStepMode(step)` - Initialize from CLI flag
+  - 5. `updateState({ running: true, containerName, branch })` - Set initial state
+  - Order matters for proper state before first iteration
+
+### 2.15 Container Name in Dashboard State
+- [ ] Store containerName and branch in dashboard state (refs: ralph.ts:420)
+  - Allows dashboard to display which container is running
+  - Allows dashboard to display which branch is being worked on
+  - Add fields to DashboardState type and initialization
+
+### 2.16 No-Dashboard Mode Behavior
+- [ ] Implement graceful no-dashboard mode (refs: specs/dashboard.md:280-284)
+  - When `--dashboard` not specified:
+  - Server not started
+  - State updates become no-ops
+  - All output to console only
+  - Current code may fail if dashboard methods called without server
+
 ---
 
 ## Priority 3: Missing Functionality
@@ -509,6 +660,45 @@
   - Verify ClaudeLive.ts includes all flags
   - Missing flag would break functionality silently
 
+### 3.10 IterationMetrics Interface
+- [ ] Define IterationMetrics interface (refs: specs/logging-telemetry.md:92-99)
+  - Fields: iteration, status, inputTokens, outputTokens, totalTokens, contextPercent, duration
+  - Status enum: "running" | "passed" | "failed" | "timeout"
+  - Add to `/workspace/src/types.ts`
+  - Required for P3.4 iteration metrics implementation
+
+### 3.11 tool_result Content Type
+- [ ] Add tool_result to ContentBlock union (refs: specs/claude-integration.md:73)
+  - Schema: `{ type: "tool_result"; tool_use_id: string; content: string }`
+  - Missing from `/workspace/src/types.ts:96-101` ContentBlock union
+  - Required for complete Claude event type coverage
+
+### 3.12 Cost Aggregation Tracking
+- [ ] Aggregate cost_usd across iterations (refs: specs/claude-integration.md:210-224)
+  - Track cumulative session cost from ClaudeResultEvent.cost_usd
+  - Display in dashboard and/or log at session end
+  - Useful for budget monitoring
+
+### 3.13 NDJSON Buffer Management Pattern
+- [ ] Implement proper NDJSON buffer management (refs: ralph.ts:265-303)
+  - Accumulate incomplete lines in buffer
+  - Use `decoder.decode(value, { stream: true })` option
+  - Preserve incomplete last line: `buffer = lines.pop() || ""`
+  - Process remaining buffer after stream ends
+  - Try-catch around JSON.parse with fallback to raw output
+
+### 3.14 Dual Stream Processing
+- [ ] Implement separate stdout/stderr stream handling (refs: ralph.ts:256-324)
+  - stdout: Parse as NDJSON with structured ClaudeEvent types
+  - stderr: Stream as raw text to console and dashboard
+  - `Promise.all([streamNDJSON(stdout), streamStderr(stderr), proc.exited])` pattern
+
+### 3.15 Dashboard vs Non-Dashboard Claude Invocation
+- [ ] Conditionally set Claude flags based on dashboard mode (refs: ralph.ts:254-335)
+  - Dashboard enabled: `--output-format stream-json`, `--verbose`, pipe streams
+  - No dashboard: `stdout: "inherit", stderr: "inherit"` for simpler output
+  - Omit streaming flags when not needed
+
 ---
 
 ## Priority 4: Robustness Improvements
@@ -551,6 +741,33 @@
   - Wrap all features.json parsing in try-catch
   - Log error but continue orchestration
   - Consistent pattern across dashboard and orchestrator
+
+### 4.7 Final Verification Reset on Changes
+- [ ] Reset finalVerificationDone when changes pushed during verification (refs: ralph.ts:566)
+  - If Claude makes changes during final verification iteration
+  - Reset `finalVerificationDone = false`
+  - Requires another clean verification pass
+  - Handles case where Claude fixes issues found during verification
+
+### 4.8 Iteration Boundary Check Order
+- [ ] Enforce correct order of loop boundary checks (refs: ralph.ts:434-464)
+  - 1. Shutdown/stopping check (exit immediately) - must be first
+  - 2. Pause check (poll until resumed) - must be after shutdown
+  - 3. Max iterations check (exit if budget exhausted)
+  - 4. Container health check (restart or abort)
+  - Order matters: shutdown must not block on pause
+
+### 4.9 Push Failure Handling
+- [ ] Handle push failures correctly in circuit breaker (refs: ralph.ts:556-567)
+  - Push failure: log warning, increment noChangeCount
+  - Push success (orchestrator retry): reset noChangeCount AND finalVerificationDone
+  - Pattern ensures transient push failures don't halt orchestration
+
+### 4.10 Local Step Mode State
+- [ ] Track step mode locally for non-dashboard operation (refs: ralph.ts:426, 573)
+  - When dashboard disabled, track stepMode in local variable
+  - When dashboard enabled, read from `isStepMode()` function
+  - Pattern: `const shouldStep = dashboard ? isStepMode() : stepModeEnabled`
 
 ---
 
@@ -620,6 +837,27 @@
   - Test git clone and branch setup
   - Test firewall ready waiting
   - Currently 0% coverage
+
+### 5.10 Command Injection Tests
+- [ ] Add security tests for prompt escaping (refs: P1.49)
+  - Test prompts with double quotes, backticks, dollar signs
+  - Verify no shell injection possible
+  - Test boundary cases: empty prompt, very long prompt
+  - Part of security test suite
+
+### 5.11 Error Recovery Path Tests
+- [ ] Test iteration error recovery behavior (refs: P1.53)
+  - Simulate timeout during runIteration
+  - Verify noChangeCount increments (not fatal error)
+  - Verify bell character emitted
+  - Verify loop continues to next iteration
+
+### 5.12 Volume Mount Validation Tests
+- [ ] Test container creation with various env states (refs: P1.50, P1.55)
+  - Test with HOME undefined
+  - Test with missing .ssh directory
+  - Test with missing .claude directory
+  - Verify correct error messages
 
 ---
 
@@ -811,6 +1049,48 @@ Per specs/features.md:6-19, the features.json schema has exactly 4 fields:
 - `verify_command` (optional)
 There is NO `dependencies` field in the spec. P1.47 was updated to reflect this.
 
+### Security Vulnerabilities Identified (Jan 2026 Analysis)
+- **P1.49 Command Injection**: ClaudeLive prompt strings not escaped before shell execution
+  - Severity: CRITICAL
+  - Affects: src/layers/ClaudeLive.ts:41, 89
+  - Attack vector: Prompt containing `"`, `$`, backticks breaks out of quotes
+- **DockerLive.exec Shell Injection**: Command string passed directly to `sh -c`
+  - Severity: MEDIUM (internal use only)
+  - Affects: src/layers/DockerLive.ts:206-219
+  - Mitigated by: Commands come from trusted internal sources
+
+### Implementation Completeness Update (Jan 2026)
+Based on extended gap analysis:
+- **Effect implementation is ~35-40% complete** (revised down from 40-50%)
+- **P1 items: 63** (increased from 48)
+- **P2 items: 16** (increased from 10)
+- **P3 items: 15** (increased from 9)
+- **P4 items: 10** (increased from 6)
+- **P5 items: 12** (increased from 9)
+- **Total items: 116** (increased from 82)
+- Security issues now tracked (P1.49, P1.62)
+
+### Items Already Implemented in Entrypoint/Firewall
+The following are implemented in docker/entrypoint.sh and docker/init-firewall.sh:
+- SSH key copying from `/root/.ssh` to `/tmp/.ssh/` with 700/600 permissions
+- Git safe.directory configuration
+- Docker DNS preservation during firewall init
+- Firewall self-verification tests (blocked + allowed domains)
+- GitHub IP CIDR aggregation via `aggregate` tool
+- Host network auto-detection and whitelisting
+These exist but weren't tracked in the plan - they work correctly.
+
+### Out of Scope Items (per specs/logging-telemetry.md:348-357)
+NOT to be implemented (explicitly out of scope):
+- Session browser UI
+- Session summaries
+- Cumulative token tracking across sessions
+- Phase-level timing
+- Thinking block toggle (hidden by default, no toggle)
+- SQLite database (JSONL only)
+- Git diff preview
+- Search/filter functionality
+
 ---
 
 ## Blockers
@@ -871,11 +1151,12 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 48 items | Blocking basic functionality |
-| P2 | Dashboard Integration | 10 items | Core UX features |
-| P3 | Missing Functionality | 9 items | Logging/telemetry subsystem |
-| P4 | Robustness | 6 items | Production readiness |
-| P5 | Test Coverage | 9 items | Quality assurance |
+| P1 | Critical Integration | 63 items | Blocking basic functionality (includes 1 CRITICAL security) |
+| P2 | Dashboard Integration | 16 items | Core UX features |
+| P3 | Missing Functionality | 15 items | Logging/telemetry subsystem + streaming |
+| P4 | Robustness | 10 items | Production readiness |
+| P5 | Test Coverage | 12 items | Quality assurance |
+| **Total** | | **116 items** | |
 
 ### Dependency Graph
 ```
@@ -1002,4 +1283,48 @@ P1.45 UserKnownHostsFile ───► P1.23 Git Configuration
 P1.46 Exit Code Validation ─► ZFC Compliance (architectural)
 P1.47 Schema Validation ────► P1.39 Features.json Validation
 P1.48 Empty Features ───────► P1.39 Features.json Validation
+
+Jan 2026 New Dependencies:
+P1.49 Command Injection ────► CRITICAL SECURITY (implement first)
+P1.50 HOME Validation ──────► P1.6 Environment Validation
+P1.51 CLI Numeric Validation ► P1.6 Environment Validation
+P1.52 getRemainingFeatures ─► P4.6 JSONL Parse Tolerance
+P1.53 Iteration Error Recovery ► P1.22 Circuit Breaker Timeout
+P1.54 createSession Cleanup ─► P1.38 Try-Finally Cleanup
+P1.55 Volume Mount Paths ───► P1.41 Volume Mounts
+P1.56 RALPH_HOME Resolution ─► P1.15 Prompt Template Workflow
+P1.57 1-Hour Safety Timeout ─► P4.2 Timeout Handling
+P1.58 Timeout Error Detection ► ClaudeLive (standalone fix)
+P1.59 Exec Exit Code ───────► P1.46 Exit Code Validation
+P1.60 DashboardError ───────► P2.11 DashboardLive Error Type
+P1.61 GitLive Dual-Path ────► P1.19 Unpushed Detection
+P1.62 Cap-Drop ALL ─────────► P1.44 CAP_NET_ADMIN Only
+P1.63 Template Naming ──────► P1.15 Prompt Template Workflow
+
+P2 New Dependencies:
+P2.11 DashboardLive Error ──► P1.60 DashboardError Definition
+P2.12 Effect.runSync ───────► DashboardLive refactor
+P2.13 Stale SSE Cleanup ────► P2.1 Dashboard Consolidation
+P2.14 Dashboard Init Sequence ► P2.2 Connect Dashboard to Effect
+P2.15 Container Name State ──► P2.2 Connect Dashboard to Effect
+P2.16 No-Dashboard Mode ────► P2.2 Connect Dashboard to Effect
+
+P3 New Dependencies:
+P3.10 IterationMetrics ─────► P3.4 Iteration Metrics
+P3.11 tool_result Type ─────► types.ts (standalone)
+P3.12 Cost Aggregation ─────► P3.4 Iteration Metrics
+P3.13 NDJSON Buffer ────────► P3.1 ClaudeService.runWithEvents
+P3.14 Dual Stream Processing ► P3.1 ClaudeService.runWithEvents
+P3.15 Dashboard Mode Flags ──► P3.14 Dual Stream Processing
+
+P4 New Dependencies:
+P4.7 Final Verification Reset ► P1.4 Final Verification Logic
+P4.8 Iteration Check Order ──► mainLoop implementation
+P4.9 Push Failure Handling ──► P1.19 Unpushed Detection
+P4.10 Local Step Mode ──────► P2.3 Step Mode in Loop
+
+P5 New Dependencies:
+P5.10 Command Injection Tests ► P1.49 Command Injection Fix
+P5.11 Error Recovery Tests ──► P1.53 Iteration Error Recovery
+P5.12 Volume Mount Tests ───► P1.50 HOME Validation
 ```
