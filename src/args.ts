@@ -8,6 +8,7 @@ export interface RalphArgs {
   dashboard: boolean
   dashboardPort: number
   step: boolean
+  mode: "plan" | "build"
 }
 
 const DEFAULT_MAX_ITERATIONS = 50
@@ -21,6 +22,7 @@ export function parseArgs(args: string[]): RalphArgs {
   let dashboard = false
   let dashboardPort = DEFAULT_DASHBOARD_PORT
   let step = false
+  let mode: "plan" | "build" = "build"
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -40,9 +42,12 @@ export function parseArgs(args: string[]): RalphArgs {
     } else if (arg === "--dashboard-port" && nextArg) {
       dashboardPort = parseInt(nextArg, 10)
       i++
+    } else if (arg === "--mode" && nextArg && ["plan", "build"].includes(nextArg)) {
+      mode = nextArg as "plan" | "build"
+      i++
     } else if (arg && !arg.startsWith("--")) {
       featuresPath = arg
     }
   }
-  return { featuresPath, branch, once, maxIterations, dashboard, dashboardPort, step }
+  return { featuresPath, branch, once, maxIterations, dashboard, dashboardPort, step, mode }
 }
