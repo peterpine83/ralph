@@ -185,10 +185,17 @@
 - Need to clarify: Remove server.ts or use for standalone testing?
 
 ### Template System
-- Prompt template lives in `/workspace/templates/ralph-instructions.md`
-- Should be read during main.ts initialization
+- Prompt template lives in `/workspace/templates/ralph-instructions.md` ✅
+- Alternative: `.ralph-prompt.md` in git root (current planning mode instructions)
+- Should read templates/ralph-instructions.md during main.ts initialization
 - Contains critical rules for Claude iterations
 - Must be loaded and passed to runIteration
+
+### Features Configuration
+- `.ralph/features.json` is currently MISSING from the workspace
+- This file is required by the orchestrator (specs/features.md)
+- Main.ts should fail with helpful error if not found
+- Not a blocker for development - can be created when needed
 
 ### Test Coverage Status
 - 80 tests passing (args, container, errors, streams, program)
