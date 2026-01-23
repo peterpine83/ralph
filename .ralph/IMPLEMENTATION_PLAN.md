@@ -364,7 +364,7 @@
 ### 1.47 Features.json Schema Validation
 - [ ] Validate required fields in features.json (refs: specs/features.md:6-19, extends P1.39)
   - Required fields per feature: `id`, `description`, `passes`
-  - Optional fields: `verify_command`, `dependencies`
+  - Optional fields: `verify_command` (NO dependencies field - not in spec schema)
   - Reject invalid schema before container creation
   - Use JSON schema or manual validation
 
@@ -792,6 +792,24 @@ Based on comprehensive gap analysis comparing ralph.ts (641 lines, working) vs E
 - Step mode: MISSING
 - Final verification: MISSING
 - Plan mode completion: MISSING
+
+### Largest Gap: Logging/Telemetry Subsystem (P3)
+The logging subsystem (P3.1-P3.9) represents the largest unimplemented feature area:
+- **LoggingService interface**: Not created (specs/logging-telemetry.md:49-52)
+- **LoggingLive layer**: Not created (specs/logging-telemetry.md:335-344)
+- **iteration_start event type**: Not in types.ts (specs/logging-telemetry.md:72-76)
+- **IterationMetrics interface**: Not defined (specs/logging-telemetry.md:93-101)
+- **New REST endpoints**: GET /iterations, GET /logs/:iteration, POST /rerun not implemented
+- **UI components**: IterationSidebar, ToolCall rendering, SubagentTracker not implemented
+- This subsystem is ~10% of total implementation but 0% started
+
+### Spec Clarification: Features.json Schema
+Per specs/features.md:6-19, the features.json schema has exactly 4 fields:
+- `id` (required)
+- `description` (required)
+- `passes` (required)
+- `verify_command` (optional)
+There is NO `dependencies` field in the spec. P1.47 was updated to reflect this.
 
 ---
 
