@@ -850,6 +850,69 @@
   - Errors from file operations won't be caught by Effect error handling
   - Use Effect.tryPromise or Effect.promise for consistency
 
+### 1.118 Command Injection in Git Branch Parameter (NEW - Jan 2026 Iteration 9)
+- [ ] Escape branch parameter in git checkout/fetch commands (refs: GitLive.ts:35,47,113)
+  - **CRITICAL SECURITY**: Branch name from user input (--branch flag) passed directly to shell
+  - `git checkout ${branch}`, `git fetch origin ${branch}`, `git checkout -b ${branch}`
+  - Attack: `--branch 'main"; rm -rf /workspace; echo "'` executes arbitrary commands
+  - Extends P1.81 - same vulnerability class in different callsites
+
+### 1.119 Command Injection in Git Clone Branch (NEW - Jan 2026 Iteration 9)
+- [ ] Escape branch parameter in git clone command (refs: program.ts:82)
+  - **CRITICAL SECURITY**: `git clone --branch ${sessionConfig.branch} ${sessionConfig.gitRoot} /tmp/repo`
+  - Both branch and gitRoot parameters can contain shell metacharacters
+  - Attack: `--branch '--upload-pack=rm -rf /' trunk` could exploit git options
+  - Distinct from P1.118 - git clone has different option attack surface
+
+### 1.120 Exec Scoped Stream Resource Leak (NEW - Jan 2026 Iteration 9)
+- [ ] Fix Effect.scoped in DockerLive.execStream (refs: DockerLive.ts:221-243)
+  - Returns streams wrapped in `Effect.scoped`, but scope released when Effect completes
+  - If consumer gets Effect but never runs streams, docker exec process leaks
+  - Pattern: Scope cleanup ≠ stream consumption completion
+  - Need acquireRelease pattern or ensure streams consumed before scope exits
+
+### 1.121 parseInt NaN maxIterations Loop Bug (NEW - Jan 2026 Iteration 9)
+- [ ] Validate parseInt result for maxIterations (refs: args.ts:36, program.ts:295-297)
+  - `parseInt("invalid", 10)` returns NaN
+  - Loop condition `state.noChangeCount < 3` has no NaN check
+  - `NaN < 3` is false → loop body never executes
+  - Extends P1.51 - specific failure mode causing silent no-op
+
+### 1.122 parseInt NaN dashboardPort Server Error (NEW - Jan 2026 Iteration 9)
+- [ ] Validate parseInt result for dashboardPort (refs: args.ts:43)
+  - `parseInt("invalid", 10)` returns NaN
+  - Bun.serve at DashboardLive.ts:113 tries to bind to port NaN
+  - Cryptic error: "Failed to start server" without clear cause
+  - Different failure mode than P1.121 - server startup vs loop
+
+### 1.123 Container State Verification After Firewall Wait (NEW - Jan 2026 Iteration 9)
+- [ ] Verify container running after firewall sleep (refs: program.ts:75-76)
+  - After `Effect.sleep("3 seconds")`, immediately calls git clone
+  - If container crashed during entrypoint.sh, sleep completes but clone fails
+  - No verification that container is still running before proceeding
+  - Different from P1.10 (iteration-level check) - this is startup sequence
+
+### 1.124 createSession Partial Failure Container Leak (NEW - Jan 2026 Iteration 9)
+- [ ] Add cleanup for partial createSession failures (refs: program.ts:23-200)
+  - If git clone fails after container created, container orphaned
+  - If firewall wait times out, container orphaned
+  - Need Effect.ensuring or acquireRelease within createSession, not just main.ts
+  - Extends P1.54 - applies within session creation, not just main
+
+### 1.125 Initial remainingFeaturesCount Logic Bug (NEW - Jan 2026 Iteration 9)
+- [ ] Fix initial state in mainLoop (refs: program.ts:291)
+  - Initial state: `{ iteration: 0, noChangeCount: 0, remainingFeaturesCount: 0 }`
+  - `remainingFeaturesCount: 0` is wrong - should be unknown until first iteration
+  - Loop condition `state.remainingFeaturesCount > 0` would incorrectly exit on iteration 0
+  - Works by accident due to `iteration === 0` guard - fragile logic
+
+### 1.126 CircuitBreaker Check After Loop Timing (NEW - Jan 2026 Iteration 9)
+- [ ] Move circuit breaker check into loop condition (refs: program.ts:324-330)
+  - Check happens AFTER loop completes: `if (finalState.noChangeCount >= 3)`
+  - If loop exits due to features completing, check never triggers error
+  - CircuitBreakerError only thrown if loop exits for OTHER reason with high noChangeCount
+  - Should be checked at end of each iteration, not after entire loop
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -1047,6 +1110,26 @@
   - Return raw JSONL events for specific iteration
   - Required for loading historical iteration logs
 
+### 2.31 Dashboard OPTIONS CORS Handling (NEW - Jan 2026 Iteration 9)
+- [ ] Add CORS pre-flight handling for cross-origin requests (refs: specs/dashboard.md:272)
+  - OPTIONS endpoint needed for browser CORS pre-flight
+  - May be auto-handled by Bun.serve but not verified
+  - Required for dashboard running on different port than orchestrator
+
+### 2.32 SSE Broadcast Backpressure Handling (NEW - Jan 2026 Iteration 9)
+- [ ] Add backpressure handling for slow SSE clients (refs: DashboardLive.ts:28-34)
+  - Current: Broadcasts to all clients synchronously in for loop
+  - If one client is slow (network lag), enqueue blocks entire broadcast
+  - Other clients experience delayed events
+  - Pattern: Use async iteration or queue per client
+
+### 2.33 Overly Broad Error Suppression in Broadcast (NEW - Jan 2026 Iteration 9)
+- [ ] Narrow catch clause in SSE broadcast (refs: DashboardLive.ts:29-32)
+  - Current: `try { ... } catch { // silent }`
+  - Catches ALL exceptions, not just client disconnect
+  - If TextEncoder throws (invalid data), JSON.stringify throws (circular ref), errors silently swallowed
+  - Should catch specific error types or at least log others
+
 ---
 
 ## Priority 3: Missing Functionality
@@ -1185,6 +1268,19 @@
   - Iteration card shows ✗ status
   - Define error event type and dashboard rendering
 
+### 3.22 LoggingService Interface Definition (NEW - Jan 2026 Iteration 9)
+- [ ] Create LoggingService interface at src/services/Logging.ts (refs: specs/logging-telemetry.md:49-52)
+  - Methods: `appendEvent(event)`, `getIterationEvents(n)`, `getSessionPath()`
+  - Effect-based interface matching existing service patterns
+  - **CRITICAL**: Logging subsystem cannot be implemented without this interface
+
+### 3.23 LoggingLive Layer Implementation (NEW - Jan 2026 Iteration 9)
+- [ ] Create LoggingLive layer at src/layers/LoggingLive.ts (refs: specs/logging-telemetry.md:335-344)
+  - Implements LoggingService interface
+  - Writes to `.ralph/sessions/{session-id}.jsonl`
+  - Creates sessions directory if needed
+  - **CRITICAL**: Required for JSONL persistence
+
 ---
 
 ## Priority 4: Robustness Improvements
@@ -1302,6 +1398,20 @@
   - ClaudeLive and GitLive both depend on DockerService
   - No explicit validation prevents circular dependencies
   - Effect should detect at runtime, but validation at build time better
+
+### 4.19 Container Start Operation Timeout (NEW - Jan 2026 Iteration 9)
+- [ ] Add timeout to docker start operation (refs: program.ts:60-68)
+  - `docker start` can hang indefinitely if entrypoint.sh blocks
+  - No timeout applied (contrast with Claude's 10min timeout)
+  - Should use Effect.timeout or similar pattern
+  - Prevents orchestrator from hanging on container startup failures
+
+### 4.20 Session ID Collision Risk in Concurrent Scenarios (NEW - Jan 2026 Iteration 9)
+- [ ] Add uniqueness to session ID generation (refs: container.ts:20)
+  - Current: `ralph-${Date.now()}` uses millisecond timestamp
+  - If two instances start in same millisecond, identical container names
+  - Docker create fails with "container name already in use"
+  - Pattern: Add random suffix or process ID for uniqueness
 
 ---
 
@@ -1444,6 +1554,20 @@
   - Test host IP extraction from default route
   - Test /24 network computation
   - Critical networking code has no tests
+
+### 5.21 parseStaleContainers Format Validation Tests (NEW - Jan 2026 Iteration 9)
+- [ ] Test container name parsing robustness (refs: container.ts:27-28)
+  - Test with different docker ps output formats
+  - Test with wrapped lines, extra columns, error messages
+  - Current parser assumes one container name per line
+  - Fragile parsing could cause cleanup to fail silently
+
+### 5.22 Branch Parameter Optional vs Required Tests (NEW - Jan 2026 Iteration 9)
+- [ ] Test behavior when branch parameter undefined (refs: Config.ts:12, program.ts usage)
+  - Config interface: `branch: string | undefined` (optional)
+  - program.ts:82,173,186 use branch unconditionally
+  - Should test error behavior or default generation
+  - Type vs runtime inconsistency needs coverage
 
 ---
 
@@ -1614,6 +1738,49 @@
   - `MAX_NO_CHANGE = 3` circuit breaker constant
   - `finalVerificationDone` extra iteration flag
   - All three must be checked in correct order
+
+### 6.28 Push Failure Increments noChangeCount Pattern (NEW - Jan 2026 Iteration 9)
+- [ ] Implement push failure handling in Effect mainLoop (refs: ralph.ts:558-562)
+  - When push fails (exitCode !== 0), increment noChangeCount
+  - Prevents infinite retry loops on transient git push failures
+  - Pattern from ralph.ts not yet implemented in Effect code
+  - Relates to P4.9 but this is Effect-specific implementation
+
+### 6.29 Push Success Resets finalVerificationDone Pattern (NEW - Jan 2026 Iteration 9)
+- [ ] Reset finalVerificationDone on successful push (refs: ralph.ts:563-567)
+  - When push succeeds during final verification, reset flag
+  - If Claude makes changes during verification, need another clean pass
+  - Pattern from ralph.ts - Effect version doesn't have finalVerificationDone yet
+  - Relates to P4.7 but this is Effect-specific implementation
+
+### 6.30 Firewall For-Loop Polling Pattern (NEW - Jan 2026 Iteration 9)
+- [ ] Use for-loop pattern for firewall detection (refs: ralph.ts:185-189)
+  - Pattern: `for (let i = 0; i < 30; i++)` with 1-second sleep
+  - Explicit iteration limit AND early exit on detection
+  - Different from Effect.retry - shows exact 30-second max wait
+  - Current Effect code uses fixed 3-second sleep
+
+### 6.31 Iteration Boundary Check Sequence (NEW - Jan 2026 Iteration 9)
+- [ ] Implement all four boundary checks in correct order (refs: ralph.ts:436-464)
+  - 1. Shutdown/stopping check (line 436-438)
+  - 2. Pause check with polling (line 442-449)
+  - 3. maxIterations check (line 453-456)
+  - 4. Container health check (line 460-464)
+  - All checks happen BEFORE running Claude to prevent wasted API calls
+
+### 6.32 Dashboard Server Timing Pattern (NEW - Jan 2026 Iteration 9)
+- [ ] Start dashboard server at correct point in sequence (refs: ralph.ts:412-423)
+  - Start AFTER createSession but BEFORE entering main loop
+  - Dashboard needs containerName in initial state
+  - Effect version has no dashboard integration in main.ts yet
+  - Extends P1.107 with implementation timing details
+
+### 6.33 Features Parse Silent Catch Pattern (NEW - Jan 2026 Iteration 9)
+- [ ] Use try-catch with silent ignore for features.json (refs: ralph.ts:474-480)
+  - Dashboard update is non-critical
+  - If features.json malformed during iteration, continue orchestration
+  - Pattern: `try { ... } catch { /* Ignore parse errors */ }`
+  - Relates to P6.14 but specifies exact try-catch-ignore pattern
 
 ---
 
@@ -1943,16 +2110,33 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 8)
+### Priority Summary (Updated Jan 2026 - Iteration 9)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 117 items | Blocking basic functionality (includes 3 CRITICAL security: P1.49, P1.81, P1.82; 3 verified complete; 10 new items from iteration 8) |
-| P2 | Dashboard Integration | 30 items | Core UX features (6 new from iteration 8: MIME types, 404 help, distDir, /rerun, /iterations, /logs/:iteration) |
-| P3 | Missing Functionality | 21 items | Logging/telemetry subsystem + streaming |
-| P4 | Robustness | 18 items | Production readiness |
-| P5 | Test Coverage | 20 items | Quality assurance (2 new: stderr tests, host network tests) |
-| P6 | Dashboard & Streaming Integration | 27 items | Event streaming, state sync, lifecycle |
-| **Total** | | **233 items** | ~35% complete |
+| P1 | Critical Integration | 126 items | Blocking basic functionality (includes 5 CRITICAL security: P1.49, P1.81, P1.82, P1.118, P1.119; 3 verified complete; 9 new items from iteration 9) |
+| P2 | Dashboard Integration | 33 items | Core UX features (3 new from iteration 9: CORS, backpressure, silent catch) |
+| P3 | Missing Functionality | 23 items | Logging/telemetry subsystem + streaming (2 new: service interface, layer) |
+| P4 | Robustness | 20 items | Production readiness (2 new: container start timeout, session ID collision) |
+| P5 | Test Coverage | 22 items | Quality assurance (2 new: stale containers parsing, branch param) |
+| P6 | Dashboard & Streaming Integration | 33 items | Event streaming, state sync, lifecycle (6 new patterns from ralph.ts) |
+| **Total** | | **257 items** | ~35% complete |
+
+**Key Findings Iteration 9 (Jan 2026 - Parallel 3-Agent Research)**:
+- **NEW P1.118-P1.126**: 9 new P1 items from comprehensive gap analysis
+  - P1.118-P1.119: Additional command injection vectors in git branch parameter (CRITICAL SECURITY)
+  - P1.120: Effect.scoped stream resource leak in DockerLive.execStream
+  - P1.121-P1.122: parseInt NaN validation for maxIterations and dashboardPort
+  - P1.123: Container state verification after firewall wait
+  - P1.124: createSession partial failure container leak
+  - P1.125: Initial remainingFeaturesCount logic bug
+  - P1.126: CircuitBreaker check timing issue
+- **NEW P2.31-P2.33**: 3 dashboard items (CORS, backpressure, error suppression)
+- **NEW P3.22-P3.23**: 2 critical logging items (LoggingService interface and LoggingLive layer)
+- **NEW P4.19-P4.20**: 2 robustness items (container start timeout, session ID collision)
+- **NEW P5.21-P5.22**: 2 test coverage items (stale container parsing, branch parameter)
+- **NEW P6.28-P6.33**: 6 Effect implementation patterns from ralph.ts comparison
+- **Security Analysis**: Extended P1.81 with 2 additional callsites (P1.118 branch in checkout/fetch, P1.119 branch in clone)
+- **Major Finding**: Circuit breaker check happens AFTER loop exits - timing bug may prevent error reporting
 
 **Key Findings Iteration 8 (Jan 2026 - Parallel 3-Agent Research)**:
 - **NEW P1.108-P1.117**: 10 new P1 items from comprehensive gap analysis
@@ -2328,4 +2512,40 @@ P2.30 GET /logs/:iteration ──────► P3.20 Session Recovery
 New P5 Items (Jan 2026 - Iteration 8):
 P5.19 stderr Stream Tests ───────► P1.110 stderr Stream Consumption
 P5.20 Host Network Detection ────► Firewall tests (standalone)
+
+New P1 Items (Jan 2026 - Iteration 9):
+P1.118 Command Injection Branch ─► P1.81 Git Command Injection (branch parameter in checkout/fetch)
+P1.119 Command Injection Clone ──► P1.81 Git Command Injection (branch in git clone)
+P1.120 Exec Scoped Stream Leak ──► DockerLive.execStream resource leak
+P1.121 parseInt NaN maxIterations ► P1.51 CLI Numeric Validation (infinite loop risk)
+P1.122 parseInt NaN dashboardPort ► P1.51 CLI Numeric Validation (server bind failure)
+P1.123 Container State After Sleep ► P1.10 Container Health Checks (verify running after firewall wait)
+P1.124 createSession Partial Fail ► P1.54 createSession Cleanup (container leaks on partial failure)
+P1.125 Initial remainingFeaturesCount ► Logic bug - starts at 0, should be unknown
+P1.126 CircuitBreaker Check Timing ► Check happens after loop, may never trigger
+
+New P2 Items (Jan 2026 - Iteration 9):
+P2.31 Dashboard OPTIONS CORS ─────► CORS pre-flight handling for cross-origin
+P2.32 SSE Broadcast Backpressure ─► Slow clients block entire broadcast loop
+P2.33 Silent Catch in Broadcast ──► Overly broad error suppression
+
+New P3 Items (Jan 2026 - Iteration 9):
+P3.22 LoggingService Interface ───► specs/logging-telemetry.md:49-52 (not created)
+P3.23 LoggingLive Layer ──────────► specs/logging-telemetry.md:335-344 (not implemented)
+
+New P4 Items (Jan 2026 - Iteration 9):
+P4.19 Container Start Timeout ────► docker start can hang indefinitely
+P4.20 Session ID Collision Risk ──► Date.now() collision in concurrent scenarios
+
+New P5 Items (Jan 2026 - Iteration 9):
+P5.21 parseStaleContainers Format ► Fragile parsing of docker ps output
+P5.22 Branch Parameter Undefined ─► Type says optional, code uses unconditionally
+
+New P6 Items (Jan 2026 - Iteration 9):
+P6.28 Push Failure noChangeCount ─► P4.9 Push Failure Handling (effect implementation)
+P6.29 Push Success Resets Final ──► P4.7 Final Verification Reset (effect implementation)
+P6.30 Firewall For-Loop Pattern ──► P1.27 explicit 30-iteration for-loop vs Effect.retry
+P6.31 Iteration Boundary Sequence ► P4.8 all four checks in order before Claude run
+P6.32 Dashboard Server Timing ────► P1.107 after createSession, before mainLoop
+P6.33 Features Parse Silent Catch ► P6.14 try-catch with silent ignore pattern
 ```
