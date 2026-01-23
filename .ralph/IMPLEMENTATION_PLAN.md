@@ -3128,4 +3128,151 @@ P5.23 Path Traversal Tests ───────► P1.127 Path Traversal
 P5.24 Container Name Tests ───────► P1.128 containerName Validation
 P5.25 SSE Memory Leak Tests ──────► P1.133 SSE Memory Leak
 P5.26 Detached HEAD Tests ────────► P1.136 Detached HEAD Handling
+
+New P1 Items (Jan 2026 - Iteration 12):
+P1.143 Git Config User Escaping ──► SECURITY (git config user.name/email escape double quotes)
+  - GitLive.ts:131-135 wraps name/email in double quotes but doesn't escape contents
+  - `test@example.com"; rm -rf /` breaks out of quotes
+  - Use single quotes or escape special chars
+
+P1.144 HTTP Body Validation ──────► server.ts endpoint hardening
+  - server.ts:246 `as { enabled: boolean }` is type assertion, not runtime validation
+  - server.ts:275 `as { template: string }` same issue
+  - Add runtime type checking (zod, joi, or manual validation)
+
+P1.145 HTTP Endpoint Auth ────────► SECURITY (dashboard control endpoints)
+  - server.ts:235-262 control endpoints have no authentication
+  - Any network client can pause/resume/stop orchestrator
+  - Add basic auth or token validation for control endpoints
+
+P1.146 Async IIFE Error Handling ─► server.ts:245-252 and 274-280
+  - Async IIFE in step-mode and prompt endpoints lack try-catch
+  - JSON parsing errors crash handler
+  - Wrap in try-catch with proper error response
+
+P1.147 File Serve Race Condition ─► server.ts:194-209
+  - `file.exists()` check separate from serving
+  - File could be deleted between check and read
+  - Use try-catch around read instead
+
+P1.148 Silent Broadcast Errors ───► server.ts:35-39
+  - SSE broadcast errors silently swallowed in catch block
+  - Should log errors for debugging
+  - Pattern: `try { client.enqueue } catch { clients.delete }`
+
+P1.149 Dashboard Binding Address ─► server.ts network exposure
+  - Dashboard binds to all interfaces (no host restriction)
+  - Consider binding to localhost only by default
+  - Add --dashboard-host CLI flag
+
+P1.150 StrictHostKeyChecking ─────► program.ts:157 SSH security
+  - `StrictHostKeyChecking=no` disables host key verification
+  - Enables MITM attacks on git operations
+  - Already noted in P1.45 but needs explicit fix
+
+New P2 Items (Jan 2026 - Iteration 12):
+P2.50 IterationSidebar Component ─► Dashboard UI (spec: logging-telemetry.md:79-111)
+  - Display iteration cards with status indicators
+  - Token count and context window percentage
+  - Click to load iteration logs
+  - Requires P3.22 LoggingService
+
+P2.51 SubagentIndicator Component ► Dashboard UI (spec: logging-telemetry.md:183-230)
+  - Track Task tool calls with timing
+  - Display spinner with elapsed time
+  - Show completion indicator with duration
+
+P2.52 ToolCall Component ─────────► Dashboard UI (spec: logging-telemetry.md:343)
+  - Dedicated component for formatted tool calls
+  - Auto-detect language from file extension
+  - Syntax highlighting integration
+
+P2.53 Prompt Editing Re-run ──────► Dashboard UI (spec: logging-telemetry.md:232-258)
+  - Editable prompt textarea
+  - Edit & Re-run button
+  - Creates new iteration with modified prompt
+
+P2.54 Activity Log Thinking ──────► Dashboard UI (spec: logging-telemetry.md:167-169)
+  - Hide thinking blocks by default
+  - Currently visible when expanded (ActivityLog.tsx:51-59)
+
+P2.55 Tool Calls Default Expand ──► Dashboard UI (spec: logging-telemetry.md:115)
+  - Tool calls should be expanded by default
+  - Currently collapsed (ActivityLog.tsx:74 `expanded: false`)
+
+New P3 Items (Jan 2026 - Iteration 12):
+P3.24 POST /rerun Endpoint ───────► server.ts (spec: logging-telemetry.md:328)
+  - Re-run iteration with modified prompt
+  - Creates new iteration
+  - Requires LoggingService integration
+
+P3.25 useSessionRecovery Hook ────► dashboard (spec: logging-telemetry.md:260-284)
+  - Load iteration list from /iterations
+  - Load current iteration events from /logs/:iteration
+  - Restore activity panel from JSONL
+
+P3.26 Iteration Boundary Emit ────► program.ts (spec: logging-telemetry.md:59-77)
+  - Emit iteration_start event at iteration boundaries
+  - Required for JSONL file structure
+  - Integrate with LoggingService
+
+New P4 Items (Jan 2026 - Iteration 12):
+P4.21 CLI Port Validation ────────► args.ts:43 dashboardPort
+  - No range check (could be 0, negative, or > 65535)
+  - Add validation: 1-65535
+
+P4.22 CLI maxIterations Validation ► args.ts:36
+  - No range check (could be 0 or negative)
+  - Add validation: >= 1
+
+P4.23 HOME Env Manipulation ──────► program.ts:37-39 volume mounts
+  - Uses process.env.HOME directly for volume paths
+  - If HOME manipulated, wrong directory mounted
+  - Validate HOME path before use
+
+New P5 Items (Jan 2026 - Iteration 12):
+P5.27 Integration Test: DockerLive ► No tests for actual Docker command execution
+  - DockerLive.ts:40-319 completely untested against real Docker
+  - Need tests for create, start, remove, exec, inspect
+
+P5.28 Integration Test: ClaudeLive ► No tests for Claude CLI invocation
+  - ClaudeLive.ts:21-100+ untested against real Claude
+  - Need mock Claude responses for testing
+
+P5.29 Integration Test: GitLive ──► No tests for git operations in containers
+  - GitLive.ts:19-135 untested
+  - Need tests for checkout, fetch, push, configureUser
+
+P5.30 Integration Test: Server ───► No tests for HTTP endpoints
+  - server.ts:213-300 untested
+  - Need tests for all endpoints (events, pause, resume, stop, prompt)
+
+P5.31 Integration Test: createSession ► program.ts:23-200 untested
+  - Complex 7-step initialization flow
+  - Need tests for error handling at each step
+
+P5.32 Test Coverage: DashboardLive ► No tests for SSE server lifecycle
+  - DashboardLive.ts:111-187 untested
+  - Need tests for connection handling, broadcasting
+
+New P6 Items (Jan 2026 - Iteration 12):
+P6.34 DashboardLive Control Endpoints ► P2.1 Remove Legacy server.ts
+  - DashboardLive.ts only implements SSE + static files
+  - Missing: pause, resume, step-mode, stop, prompt endpoints
+  - Need to port from server.ts or consolidate
+
+P6.35 FeatureEvent Not Broadcast ─► types.ts vs implementation
+  - FeatureEvent type exists (types.ts:46-52)
+  - Only FeaturesEvent (full list) ever broadcast
+  - Spec says individual status updates should use FeatureEvent
+
+P6.36 Terminal Component Unused ──► Dashboard architecture decision
+  - Terminal.tsx exists but not used in App.tsx
+  - ActivityLog.tsx used instead
+  - Either remove Terminal.tsx or integrate it
+
+P6.37 Effect Implementation Gap ──► program.ts vs ralph.ts
+  - Legacy ralph.ts implements all spec features
+  - Effect src/program.ts missing: cleanup stale containers, ensure running, step mode, final verification
+  - Two parallel implementations create maintenance burden
 ```
