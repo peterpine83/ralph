@@ -7211,3 +7211,298 @@ Running totals:
 - P6 items: 87 (was 79)
 - P7 items: 20 (was 10)
 - Grand total: 885 items (was 804)
+
+---
+
+## Iteration 28 Research (Jan 2026)
+
+### Research Focus
+Deep comparison of working ralph.ts implementation against Effect-based src/ implementation, with focus on:
+1. Logging/telemetry spec gaps (entire spec appears unimplemented)
+2. Template workflow implementation details
+3. Signal handling and abort patterns
+4. Dashboard static file serving integration
+
+### New P1 Items (Critical)
+
+P1.341 LoggingService Entirely Missing ► specs/logging-telemetry.md:49-56
+  - Gap: LoggingService interface and implementation do not exist
+  - spec defines: appendEvent(), getIterationEvents(), getSessionPath()
+  - Impact: No persistent logging, session recovery impossible
+  - Fix: Create src/services/Logging.ts and src/layers/LoggingLive.ts
+
+P1.342 JSONL Session File Creation Missing ► specs/logging-telemetry.md:56-77
+  - Gap: No code creates .ralph/sessions/{session-id}.jsonl
+  - spec requires JSONL file with iteration boundaries
+  - Impact: Dashboard loses all state on refresh
+  - Fix: Implement JSONL file creation and append in LoggingLive
+
+P1.343 Template Read/Write Container Workflow Missing ► ralph.ts:406-509 vs src/main.ts:32-35
+  - Gap: Effect impl uses placeholder path, doesn't write template to container
+  - Working impl: reads template file, writes to /workspace/.ralph-prompt.md via heredoc
+  - Impact: Claude never receives instructions
+  - Fix: Implement full template workflow in Effect createSession
+
+P1.344 AbortController Pattern Missing in Effect ► ralph.ts:76-82, 513-521
+  - Gap: No AbortController or abort signal wiring in Effect implementation
+  - Working impl: claudeAbortController with abortClaude() export
+  - Impact: Stop button and SIGINT cannot kill Claude immediately
+  - Fix: Add AbortController to ClaudeService, wire to dashboard stop
+
+P1.345 Signal Handlers Not Implemented in main.ts ► ralph.ts:84-102
+  - Gap: Effect main.ts has no process.on("SIGINT") or SIGTERM handlers
+  - Working impl: setupSignalHandlers() with graceful shutdown
+  - Impact: Ctrl+C kills process without cleanup
+  - Fix: Add signal handlers with shutdown state machine
+
+P1.346 Dual Input Race Pattern Missing ► ralph.ts:583-596
+  - Gap: No Promise.race for CLI + dashboard step mode input
+  - Working impl: races promptForAction() with waitForResume()
+  - Impact: Step mode only works from one input source
+  - Fix: Implement dual-input race pattern
+
+P1.347 Dashboard Static Files Path Resolution ► ralph.ts:413-414
+  - Gap: Effect DashboardLive uses Bun.file(path) without RALPH_HOME resolution
+  - Working impl: `${RALPH_HOME}/dashboard/dist/index.html`
+  - Impact: Dashboard files not found when run from different directory
+  - Fix: Use import.meta.dir for path resolution
+
+P1.348 GIT_COMMITTER_* Env Vars Missing ► ralph.ts:173-174 vs src/program.ts:41-45
+  - Gap: Effect impl only passes CLAUDE_CODE_OAUTH_TOKEN and GITHUB_TOKEN
+  - Missing: GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL
+  - Impact: Git commits may fail or use wrong author
+  - Fix: Add all git identity env vars to container config
+
+P1.349 Clone from Remote URL Not Local Path ► ralph.ts:201 vs src/program.ts:82
+  - Gap: Effect uses sessionConfig.gitRoot which is local path
+  - Working impl: runs `git remote get-url origin` first
+  - Impact: Clone includes uncommitted local changes
+  - Fix: Extract and use remote URL for clone
+
+P1.350 Plan Mode PR Completion Detection ► ralph.ts:613-626
+  - Gap: Effect implementation has no plan mode completion logic
+  - Working impl: checks PR exists + no unpushed commits = complete
+  - Impact: Plan mode runs forever or until max iterations
+  - Fix: Add plan mode completion detection to mainLoop
+
+P1.351 Final Verification Double-Check Logic ► ralph.ts:483-494
+  - Gap: Effect mainLoop lacks finalVerificationDone state and re-check
+  - Working impl: runs one more iteration after all features pass
+  - Impact: May exit before final typecheck/test/build
+  - Fix: Add finalVerificationDone state machine
+
+P1.352 PR Ready Command After Final Verification ► ralph.ts:487
+  - Gap: No `gh pr ready ${branch}` call in Effect implementation
+  - Impact: PR stays in draft state after completion
+  - Fix: Add PR ready command after final verification passes
+
+P1.353 Container User Switching for exec() ► ralph.ts:208, 211, 215
+  - Gap: Effect DockerLive.exec() doesn't support user switching
+  - Working impl: uses `-u node` for git commands, root for chown
+  - Impact: Git commands may fail with permission errors
+  - Fix: Add user option to exec() and wire appropriately
+
+P1.354 --verbose Flag in Claude Invocation ► ralph.ts:261
+  - Gap: Effect ClaudeLive run() may not consistently use --verbose
+  - Working impl: always includes --verbose in dashboard mode
+  - Impact: Less debugging information in logs
+  - Fix: Verify --verbose is always included with stream-json
+
+P1.355 Container Pause/Resume While Claude Running ► ralph.ts:442-448
+  - Gap: Effect lacks pause loop that waits while Claude isn't running
+  - Working impl: while isPaused() && !isStopping() sleep loop
+  - Impact: Pause command doesn't stop between iterations
+  - Fix: Implement pause check in mainLoop
+
+P1.356 Feature Checkbox Update in PR Description ► templates/ralph-instructions.md:103-116
+  - Gap: No code updates PR description with feature checkboxes
+  - Template instructs Claude to do it, but orchestrator should track
+  - Impact: PR description may not reflect accurate progress
+  - Fix: Consider orchestrator-level PR description updates
+
+P1.357 ANTHROPIC_API_KEY Environment Passthrough ► ralph.ts:171
+  - Gap: Effect program.ts:42 only passes CLAUDE_CODE_OAUTH_TOKEN
+  - Working impl also passes ANTHROPIC_API_KEY
+  - Impact: API key auth mode doesn't work
+  - Fix: Add ANTHROPIC_API_KEY to container env
+
+### New P2 Items (Architecture)
+
+P2.145 Server Module Has Two Implementations ► src/server.ts vs src/layers/DashboardLive.ts
+  - Gap: Both files implement SSE server with overlapping functionality
+  - src/server.ts: module-level mutable state, used by ralph.ts
+  - src/layers/DashboardLive.ts: Effect-based with Ref, for Effect impl
+  - Impact: Maintenance burden, potential for divergence
+  - Fix: Consolidate to Effect-based implementation
+
+P2.146 No Layer for LoggingService ► specs/logging-telemetry.md:49-53
+  - Gap: Logging is mentioned but no service interface exists
+  - Other services have interface + Live layer pattern
+  - Impact: Can't inject logging via Effect context
+  - Fix: Create LoggingService interface following pattern
+
+P2.147 Dashboard State Duplicated Between Files ► src/server.ts:9-21 vs src/types.ts:DashboardState
+  - Gap: src/server.ts has inline DashboardState object, types.ts has interface
+  - Object structure may drift from interface
+  - Impact: Type mismatches between module and Effect implementations
+  - Fix: Use single source of truth for state structure
+
+P2.148 Template Content Not Stored in DashboardState ► src/layers/DashboardLive.ts
+  - Gap: promptTemplate in state but not actually sent to clients for viewing
+  - Dashboard spec shows prompt at top of activity panel
+  - Impact: Dashboard can't display original prompt
+  - Fix: Add prompt to state events and dashboard display
+
+### New P3 Items (Robustness)
+
+P3.111 No Retry on Remote URL Extraction ► ralph.ts:201
+  - Gap: `git remote get-url origin` can fail if detached/no remote
+  - Single call with no fallback
+  - Impact: Session creation fails for unusual git states
+  - Fix: Add retry or fallback to local clone
+
+P3.112 Heredoc Special Character Escaping ► ralph.ts:507-509
+  - Gap: Template content written via heredoc without escaping
+  - If template contains PROMPT_EOF, heredoc breaks
+  - Impact: Template with specific strings breaks session
+  - Fix: Use unique delimiter or escape sequence
+
+P3.113 PR Creation Race Condition ► ralph.ts (multiple locations)
+  - Gap: Multiple places check if PR exists independently
+  - PR could be created between check and action
+  - Impact: Duplicate PR creation attempts
+  - Fix: Use gh pr view --json as source of truth with caching
+
+P3.114 Container Log Streaming for Firewall Detection ► ralph.ts:185-189
+  - Gap: Polls logs in loop with sleep(1000)
+  - If firewall message printed and scrolled, may miss it
+  - Impact: May timeout waiting for already-ready container
+  - Fix: Use docker logs -f --since for streaming detection
+
+### New P4 Items (Dashboard/UX)
+
+P4.89 Dashboard Build Output Missing from Dist ► dashboard/
+  - Gap: dashboard/dist/ not tracked in git
+  - Running dashboard requires build step first
+  - Impact: First-time users may see blank dashboard
+  - Fix: Either track dist/ or add build step to orchestrator startup
+
+P4.90 No Dashboard Connection Status Indicator
+  - Gap: Dashboard doesn't show if SSE connection is active/lost
+  - If connection drops, user sees stale state
+  - Impact: User may think system is frozen when connection lost
+  - Fix: Add connection status indicator with reconnect button
+
+P4.91 Terminal Bell on Circuit Breaker Not Wired ► ralph.ts:534
+  - Gap: Effect implementation doesn't emit \x07 on circuit breaker
+  - Working impl: process.stdout.write("\x07") to alert user
+  - Impact: User not notified of circuit breaker trigger
+  - Fix: Add bell emission in Effect error handling
+
+### New P5 Items (Consistency)
+
+P5.97 Inconsistent Container Name Prefix ► src/container.ts vs ralph.ts
+  - Gap: Both use "ralph-session" prefix but container.ts adds parseStaleContainers
+  - Cleanup logic may not find all containers
+  - Impact: Stale containers may persist
+  - Fix: Ensure consistent naming convention
+
+P5.98 Mode Parameter Not Threaded Through mainLoop ► src/program.ts
+  - Gap: mainLoop doesn't receive mode (plan vs build)
+  - Different behaviors needed for each mode
+  - Impact: Build mode logic used for plan mode
+  - Fix: Add mode to mainLoop parameters
+
+P5.99 Template File Names Not Centralized ► ralph.ts:407-408, templates/
+  - Gap: Template names hardcoded in multiple locations
+  - ralph-plan-mode.md and ralph-instructions.md
+  - Impact: Rename requires multiple file edits
+  - Fix: Define template paths as constants
+
+### New P6 Items (Minor)
+
+P6.88 Dashboard Port Hardcoded in Multiple Places ► src/args.ts:43, src/layers/ConfigLive.ts:61
+  - Gap: Default port 3847 appears in two files
+  - Impact: Changing default requires two edits
+  - Fix: Define once, import elsewhere
+
+P6.89 Console Logging Style Inconsistent ► ralph.ts, src/program.ts
+  - Gap: ralph.ts uses console.log with === headers
+  - Effect code uses Effect.log or no logging
+  - Impact: Inconsistent operator experience
+  - Fix: Define logging style guide
+
+P6.90 No Version Tracking in Container ► Dockerfile, ralph.ts
+  - Gap: No Ralph version label in container
+  - Impact: Can't identify which Ralph version created container
+  - Fix: Add VERSION or BUILD_ID label
+
+### New P7 Items (Test Coverage)
+
+P7.21 Template Resolution Path Tests ► templates/*.md
+  - Gap: Template path resolution untested
+  - Running from different directories may fail
+  - Impact: Template loading may silently fail
+  - Fix: Add tests for template resolution from various CWDs
+
+P7.22 Plan Mode vs Build Mode Branching Tests ► src/program.ts, src/main.ts
+  - Gap: Mode-dependent logic paths untested
+  - Impact: Plan mode may have undiscovered bugs
+  - Fix: Add mode-specific test cases
+
+P7.23 SSE Reconnection Tests ► dashboard/src/hooks/useSSE.ts
+  - Gap: SSE reconnection behavior untested
+  - Impact: Reconnection may not work correctly
+  - Fix: Add SSE lifecycle tests
+
+---
+
+Iteration 28 Dependency Graph:
+P1.341-342 LoggingService ──────────────► Dashboard persistence (critical)
+P1.343-347 Template/Path ───────────────► Core workflow (critical)
+P1.348-357 Env/Mode/State ──────────────► Feature completeness
+P2.145-148 Architecture ────────────────► Code quality
+P3.111-114 Robustness ──────────────────► Reliability
+P4.89-91 Dashboard UX ──────────────────► User experience
+P5.97-99 Consistency ───────────────────► Maintainability
+P6.88-90 Minor ─────────────────────────► Polish
+P7.21-23 Test Coverage ─────────────────► Quality assurance
+
+Summary (Iteration 28):
+- 17 new P1 items (P1.341-P1.357) - Logging, templates, workflow gaps
+- 4 new P2 items (P2.145-P2.148) - Architecture consolidation
+- 4 new P3 items (P3.111-P3.114) - Robustness improvements
+- 3 new P4 items (P4.89-P4.91) - Dashboard/UX gaps
+- 3 new P5 items (P5.97-P5.99) - Consistency issues
+- 3 new P6 items (P6.88-P6.90) - Minor polish
+- 3 new P7 items (P7.21-P7.23) - Test coverage
+- Total new items: 37
+
+Running totals:
+- P1 items: 357 (was 340)
+- P2 items: 148 (was 144)
+- P3 items: 114 (was 110)
+- P4 items: 91 (was 88)
+- P5 items: 99 (was 96)
+- P6 items: 90 (was 87)
+- P7 items: 23 (was 20)
+- Grand total: 922 items (was 885)
+
+### Iteration 28 Key Insight
+
+The largest gap is the **entire logging-telemetry.md spec is unimplemented**. This includes:
+- LoggingService (interface + layer) - 0% complete
+- JSONL session persistence - 0% complete
+- Iteration sidebar UI - 0% complete
+- Subagent tracking - 0% complete
+- Prompt editing/rerun - 0% complete
+- State recovery on reconnect - 0% complete
+
+The logging-telemetry spec represents approximately 15-20 implementation tasks that would comprise a major feature milestone. The dashboard currently has basic SSE streaming but none of the advanced features in the spec.
+
+Additionally, the Effect-based implementation in src/main.ts is still a placeholder and lacks approximately 60% of the functionality present in the working ralph.ts implementation. The critical missing pieces are:
+1. Template workflow (write to container)
+2. Signal handling
+3. Abort patterns for stop functionality
+4. Plan mode completion detection
+5. Final verification iteration
