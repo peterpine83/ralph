@@ -6016,3 +6016,254 @@ Running totals:
 - P5 items: 80 (was 77)
 - P6 items: 73 (was 70)
 - Grand total: 714 items (was 681)
+
+---
+
+## Iteration 25 Research (Jan 2026)
+
+### New P1 Items (Critical Gaps)
+
+P1.289 Template Uses Fields Not in Features Schema ► templates/ralph-instructions.md:56-67
+  - Gap: Template references `acceptance`, `verification`, `steps` fields
+  - Spec only defines: `id`, `description`, `passes`, `verify_command` (features.md:6-19)
+  - Impact: Claude may expect fields that don't exist in features.json
+  - Fix: Update template to use only spec-defined fields
+
+P1.290 PR Title Format Uses Nonexistent Project Name ► templates/ralph-instructions.md:84
+  - Gap: `--title "Ralph: {project name from features.json}"` but no project field
+  - features.json has `features` array only, no project metadata
+  - Impact: Claude cannot generate correct PR title
+  - Fix: Define PR title derivation (use first feature slug, or repo name)
+
+P1.291 Build Script Detection Logic Unspecified ► specs/orchestrator.md:109,133
+  - Gap: "if build script exists" referenced but no detection method specified
+  - Options: Check package.json for scripts.build, try-and-catch, etc.
+  - Impact: Inconsistent behavior across different package managers
+  - Fix: Specify detection: `jq -e '.scripts.build' package.json`
+
+P1.292 Git Author Name/Email Defaults Missing ► specs/container.md:106-109
+  - Gap: Git config commands shown but no default user.name/user.email values
+  - Ralph.ts uses "ralph-bot" but not specified in spec
+  - Impact: Commits may have empty or inconsistent author info
+  - Fix: Document defaults: `Ralph Bot <ralph-bot@noreply.github.com>`
+
+P1.293 Dashboard Port Conflict Handling Missing ► specs/dashboard.md:40-75
+  - Gap: No spec for what happens if dashboard port is already in use
+  - Bun.serve() will throw if port unavailable
+  - Impact: Unclear error message, no recovery path
+  - Fix: Add port availability check, increment port or fail with clear message
+
+P1.294 IPSet Destroy Ignores Errors ► docker/init-firewall.sh:27
+  - Gap: `ipset destroy allowed-domains 2>/dev/null || true`
+  - If ipset is in use by iptables rule, destroy fails silently
+  - Previous rules may persist, causing inconsistent state
+  - Impact: Firewall may have stale rules on re-initialization
+  - Fix: Flush iptables before ipset destroy, verify destruction
+
+P1.295 DNS Resolution Failure Allows Partial Whitelist ► docker/init-firewall.sh:95-98
+  - Gap: DNS failure prints warning but continues
+  - Some domains may be missing from whitelist
+  - Impact: Runtime connection failures to unresolved domains
+  - Fix: Either fail fast or add fallback IPs for critical domains
+
+P1.296 Host IP Detection Failure Leaves No Cleanup ► docker/init-firewall.sh:112-115
+  - Gap: If HOST_IP detection fails, script exits immediately
+  - NAT rules already flushed but no firewall rules applied
+  - Overlaps P1.278 but focuses on state after failure
+  - Fix: Add cleanup on error or apply minimal firewall before exit
+
+P1.297 CIDR Validation Exits on First Invalid Entry ► docker/init-firewall.sh:70-73
+  - Gap: Invalid CIDR causes immediate exit
+  - Valid CIDRs before the invalid one already added
+  - Impact: Partial firewall state on validation failure
+  - Fix: Validate all before adding, or rollback on failure
+
+P1.298 Context Window 200k Hardcoded Without Model Check ► specs/logging-telemetry.md:99
+  - Gap: `(totalTokens / 200000) * 100` assumes specific model
+  - No fallback for different model context sizes
+  - Marked as "open question" at line 362 but needs decision
+  - Fix: Make configurable or document model assumption
+
+P1.299 JSONL Session File Permissions Not Specified ► specs/logging-telemetry.md:56
+  - Gap: `.ralph/sessions/{session-id}.jsonl` permissions unspecified
+  - Security concern: Should be 0600 (owner only) for sensitive data
+  - Impact: Session logs may be world-readable
+  - Fix: Specify 0600 permissions in spec and implementation
+
+P1.300 Firewall Ready Timeout Value Not in Spec ► src/program.ts:74
+  - Gap: P1.2 mentions "30s timeout" but spec just says "wait for message"
+  - Implementation detail masquerading as spec requirement
+  - Fix: Add timeout value to spec or make configurable
+
+### New P2 Items (Architecture)
+
+P2.120 Subagent Type Values Undocumented ► templates/ralph-instructions.md:42-43
+  - Gap: Template uses `subagent_type="Explore"` and `subagent_type="codebase-pattern-finder"`
+  - These values not documented in any spec
+  - Impact: No validation that these are correct Claude Code values
+  - Fix: Document valid subagent_type values in claude-integration.md
+
+P2.121 Cleanup Ordering Not Specified ► specs/orchestrator.md:48-51
+  - Gap: "cleanup in finally block" but ordering unspecified
+  - Dashboard stop before container? SSE disconnect before server shutdown?
+  - Impact: Race conditions in cleanup sequence possible
+  - Fix: Document cleanup order: 1) SSE disconnect, 2) Server stop, 3) Container remove
+
+P2.122 Duplicate Error Types in Service Files ► src/services/Docker.ts:6-10
+  - Gap: Service files define their own error interfaces
+  - Canonical errors in `src/errors/index.ts` already exist
+  - Comment at services/index.ts:2 says "import from ../errors"
+  - Impact: Duplicate type definitions, potential inconsistency
+  - Fix: Remove error interfaces from service files, use errors/index.ts
+
+P2.123 Two SSH Key Mount Locations ► docker/entrypoint.sh:15 vs src/program.ts:37
+  - Gap: Entrypoint checks `/home/node/.ssh`, program mounts to same location
+  - But spec shows `/root/.ssh` at container.md:238-241
+  - Overlaps P6.71 but focuses on source conflict
+  - Fix: Align mount location between spec, entrypoint, and program
+
+P2.124 Error Suppression in Entrypoint Not Documented ► docker/entrypoint.sh:20
+  - Gap: `chmod 600 /tmp/.ssh/* 2>/dev/null || true` suppresses all errors
+  - Spec at container.md:238-241 doesn't show this pattern
+  - Impact: Silent failures could cause git auth issues
+  - Fix: Document error suppression or add explicit empty-directory handling
+
+### New P3 Items (Robustness)
+
+P3.87 No Retry for GitHub API Fetch ► docker/init-firewall.sh:57
+  - Gap: Single curl attempt to api.github.com/meta
+  - Network blip or rate limit causes firewall init failure
+  - Impact: Container startup fails on transient network issues
+  - Fix: Add retry with exponential backoff (3 attempts)
+
+P3.88 No Offline Fallback for GitHub IPs ► docker/init-firewall.sh:55-76
+  - Gap: If GitHub API unreachable, firewall init fails
+  - Could cache last-known IPs or use documented ranges
+  - Impact: Cannot start containers without network access
+  - Fix: Bundle fallback IP ranges or cache mechanism
+
+P3.89 IPv6 AAAA Records Not Resolved ► docker/init-firewall.sh:94
+  - Gap: Only resolves A records: `dig +noall +answer A "$domain"`
+  - IPv6 AAAA records ignored
+  - Impact: IPv6-only endpoints not whitelisted
+  - Fix: Also resolve AAAA records if IPv6 enabled
+
+P3.90 No CAP_NET_ADMIN Pre-flight Check ► docker/init-firewall.sh
+  - Gap: Script requires NET_ADMIN capability
+  - No check before attempting iptables commands
+  - Overlaps P3.83 but specific to pre-flight
+  - Impact: Cryptic iptables permission errors
+  - Fix: Check capability at script start: `capsh --print | grep net_admin`
+
+P3.91 Aggregate Command May Not Be Installed ► docker/init-firewall.sh:76
+  - Gap: Uses `aggregate -q` for CIDR optimization
+  - Package installed at Dockerfile.base:18 but no runtime check
+  - Impact: Cryptic error if aggregate missing
+  - Fix: Add `command -v aggregate` check at script start
+
+P3.92 Binary Copy Verification Missing ► docker/Dockerfile.base:48-49,56
+  - Gap: Copies binaries but doesn't verify they work
+  - `bun --version` or `claude --version` not run after copy
+  - Impact: Build succeeds with broken binaries
+  - Fix: Add version check RUN commands after each binary install
+
+### New P4 Items (Polish)
+
+P4.69 Dashboard Static File MIME Types ► src/server.ts:193-209
+  - Gap: No explicit MIME type handling for static files
+  - Bun may auto-detect but spec should define
+  - Impact: Some browsers may not parse files correctly
+  - Fix: Add explicit MIME type mapping for .js, .css, .html
+
+P4.70 Iteration Number Display Format Unspecified ► specs/logging-telemetry.md:81-88
+  - Gap: "Iteration 1", "Iteration 2" shown but format details missing
+  - Zero-padded? Start from 0 or 1? Max width?
+  - Impact: Inconsistent display across UI components
+  - Fix: Specify: 1-indexed, no zero-padding, format "Iteration {n}"
+
+P4.71 Session ID Format Example Outdated ► specs/logging-telemetry.md:64
+  - Gap: Example `ralph-session-20250115-143052.jsonl`
+  - Container naming changed per P5.80
+  - Impact: Documentation doesn't match implementation
+  - Fix: Update example to match current container naming
+
+### New P5 Items (Consistency)
+
+P5.81 githubusercontent.com Coverage Ambiguous ► docker/init-firewall.sh:76
+  - Gap: Uses .packages field from GitHub meta API
+  - Unclear if this covers all *.githubusercontent.com subdomains
+  - Spec lists `*.githubusercontent.com` explicitly (networking.md:38)
+  - Fix: Verify coverage or add explicit DNS resolution
+
+P5.82 Effect Context.Tag Workaround Not Documented ► src/layers/ClaudeLive.ts:135
+  - Gap: Three live layers use `as any` workaround
+  - Comment references "ralph-progress.txt effect-020" which may not exist
+  - Impact: Technical debt without context
+  - Fix: Document workaround in code comments or tech-debt.md
+
+P5.83 parseNDJSONWithFallback Silent Catch ► src/streams/ndjson.ts:52-58
+  - Gap: Catches JSON parse errors silently, returns text
+  - Intentional but could mask protocol errors
+  - Impact: May miss malformed JSON from Claude
+  - Fix: Document behavior, consider logging parse failures
+
+P5.84 Test Mock Type Assertions ► src/program.test.ts:44
+  - Gap: Tests use `as any` to create mock services
+  - Not a bug but could hide type errors in tests
+  - Impact: Mocks may drift from actual interface
+  - Fix: Create properly-typed test factories
+
+### New P6 Items (Minor)
+
+P6.74 Ralph Wiggum Technique Doc Missing ► specs/README.md:62-67
+  - Gap: Spec references thoughts/shared/reference/ralph-wiggum-technique.md
+  - File may not exist
+  - Impact: Documentation link 404
+  - Fix: Create document or remove reference
+
+P6.75 Dockerfile CMD Overridden by Orchestrator ► docker/Dockerfile.base:78
+  - Gap: `CMD ["claude", "--version"]` always overridden
+  - Serves no runtime purpose, only useful for manual testing
+  - Overlaps P6.73 but notes why it exists
+  - Impact: Minor confusion
+  - Fix: Add comment explaining purpose
+
+P6.76 gosu vs sudo Best Practice Not Documented ► docker/entrypoint.sh:37
+  - Gap: Uses `exec gosu node "$@"` but no comment explaining why
+  - gosu is Docker best practice for privilege dropping
+  - Impact: Maintainers may not understand the choice
+  - Fix: Add comment: "gosu handles signals better than sudo in containers"
+
+---
+
+Iteration 25 Dependency Graph Additions:
+P1.289-290 Template Issues ──────────────► Feature parsing, PR creation
+P1.291-292 Build/Git Config ─────────────► Container setup correctness
+P1.293 Dashboard Port ───────────────────► Dashboard reliability
+P1.294-297 Firewall Robustness ──────────► P1.276-278 (extends)
+P1.298-299 Spec Gaps ────────────────────► Documentation completeness
+P1.300 Timeout Spec ─────────────────────► P1.2 (clarifies)
+
+P2.120-124 Architecture ─────────────────► Code organization and patterns
+P3.87-92 Robustness ─────────────────────► Failure handling
+P4.69-71 Polish ─────────────────────────► UI and documentation
+P5.81-84 Consistency ────────────────────► Code quality
+P6.74-76 Minor ──────────────────────────► Documentation
+
+Summary (Iteration 25):
+- 12 new P1 items (P1.289-P1.300) - Template, firewall, spec gaps
+- 5 new P2 items (P2.120-P2.124) - Architecture and patterns
+- 6 new P3 items (P3.87-P3.92) - Robustness
+- 3 new P4 items (P4.69-P4.71) - Polish
+- 4 new P5 items (P5.81-P5.84) - Consistency
+- 3 new P6 items (P6.74-P6.76) - Documentation
+- Total new items: 33
+
+Running totals:
+- P1 items: 300 (was 288)
+- P2 items: 124 (was 119)
+- P3 items: 92 (was 86)
+- P4 items: 71 (was 68)
+- P5 items: 84 (was 80)
+- P6 items: 76 (was 73)
+- Grand total: 747 items (was 714)
