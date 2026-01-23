@@ -207,6 +207,82 @@
   - All 8 whitelisted domains reachable
   - `ipset create allowed-domains hash:net` succeeded
 
+### 1.25 Git Author Environment Defaults
+- [ ] Add default git author configuration (refs: ralph.ts:173-174)
+  - Pass `GIT_AUTHOR_NAME=${process.env.GIT_AUTHOR_NAME || 'Ralph'}` to container
+  - Pass `GIT_AUTHOR_EMAIL=${process.env.GIT_AUTHOR_EMAIL || 'ralph@localhost'}` to container
+  - Ensures commits work without user git configuration
+  - Missing from program.ts:32-45 container creation
+
+### 1.26 Git Safe Directory --system Flag
+- [ ] Use --system flag for git config in container (refs: ralph.ts:193, specs/container.md)
+  - `.gitconfig` is mounted read-only (`:ro` flag)
+  - Cannot use `--global` because it writes to read-only mounted file
+  - Must use `--system` flag for all git config commands
+  - Affects P1.23 implementation: all `git config --global` must be `git config --system`
+
+### 1.27 Firewall Polling with Specific Timeout
+- [ ] Implement 30-second timeout for firewall detection (refs: ralph.ts:182-189)
+  - Poll every 1 second, max 30 iterations
+  - `docker logs ${containerName} 2>&1` to check for "Ralph Firewall Ready"
+  - Exit loop on message detection or timeout
+  - Current P1.2 mentions "30s fallback" but doesn't specify polling interval
+
+### 1.28 Clone via Temp Directory Pattern
+- [ ] Use /tmp/repo intermediate directory for clone (refs: ralph.ts:207-211)
+  - Cannot clone directly to `/workspace` (git requires empty directory)
+  - Pattern: `git clone → /tmp/repo` then `cp -a /tmp/repo/. /workspace/`
+  - Then `rm -rf /tmp/repo` and `chown -R node:node /workspace`
+  - Currently in program.ts:79-118 but rationale not documented
+
+### 1.29 Container Create+Start Two-Step Pattern
+- [ ] Document and verify create/start separation (refs: ralph.ts:164-180)
+  - `docker create` with `sleep infinity` command (container not started)
+  - `docker start` runs entrypoint.sh (firewall initialization)
+  - Two-step ensures entrypoint runs exactly once
+  - `sleep infinity` provides long-running process after entrypoint completes
+
+### 1.30 Dual Input Source Race Pattern
+- [ ] Implement Promise.race for CLI + dashboard input (refs: ralph.ts:583-596)
+  - When step mode active AND dashboard enabled, accept input from either source
+  - `Promise.race([promptForAction(), waitForResume()])` pattern
+  - `waitForResume()` polls `isPaused()` with 100ms interval
+  - First source to respond controls action ("continue" or "stop")
+  - Critical for UX when both CLI and browser are active
+
+### 1.31 Host-Side Remote Branch Verification
+- [ ] Verify resume branch exists before container creation (refs: ralph.ts:388-396)
+  - Run `git ls-remote --heads origin ${resumeBranch}` on HOST (not container)
+  - Fail fast with "ERROR: Branch not found on remote: {branch}" if missing
+  - Prevents expensive container setup for invalid resume branch
+  - Currently P1.13 mentions verification but not host-side execution
+
+### 1.32 ralph-progress.txt Persistence
+- [ ] Ensure ralph-progress.txt persists across iterations (refs: specs/orchestrator.md:215)
+  - Location: `/workspace/ralph-progress.txt` in container
+  - Purpose: Claude's learning notes across iterations
+  - Orchestrator never reads/writes this file (Claude manages it)
+  - File remains in container between iterations automatically
+  - Document as "hands-off" file in orchestrator
+
+### 1.33 Features.json Directory Creation
+- [ ] Ensure .ralph directory exists before file copy (refs: ralph.ts:217-227)
+  - Run `mkdir -p /workspace/.ralph` before copying features.json
+  - Required for both build mode (features.json) and plan mode (.ralph-prompt.md)
+  - Use root user for mkdir, then chown to node
+
+### 1.34 Credential Helper Conditional Setup
+- [ ] Only configure gh credential helper if token exists (refs: ralph.ts:196-198)
+  - Check if `githubToken` is non-empty before configuring
+  - Command: `git config --system credential.helper '!gh auth git-credential'`
+  - Skip if no GitHub token (allows SSH-only workflow)
+
+### 1.35 Exit Message with PR View Command
+- [ ] Print helpful exit message on completion (refs: ralph.ts:637)
+  - `console.log(\`\\nTo view PR: gh pr view ${branch}\`)`
+  - Provides immediate next action for user
+  - Only show when PR exists (after successful orchestration)
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -461,6 +537,36 @@ Per research, different operations have different timeouts:
 - **Docker operations**: Not specified (should use transient failure retry)
 - **Git operations**: Not specified (should use transient failure retry)
 
+### Additional Gap Analysis Findings (Jan 2026)
+
+**Bun-Specific API Patterns**:
+- `.quiet().nothrow()` - Suppresses output and allows non-zero exit codes (ralph.ts:140, 235, 487)
+- Used for: container cleanup, PR ready, commands that may fail expectedly
+- Effect equivalent: `Effect.orElse(() => Effect.succeed(null))` with logging disabled
+
+**Container Command Requirement**:
+- Container must be created with `sleep infinity` command
+- This keeps container running after entrypoint.sh completes
+- Entrypoint.sh initializes firewall then returns
+- Without `sleep infinity`, container would exit immediately
+
+**Read-Only Mount Implications**:
+- `.gitconfig` mounted with `:ro` flag (ralph.ts:169)
+- Prevents container from modifying host git configuration
+- Requires all git config changes to use `--system` instead of `--global`
+- This is a security-conscious design decision
+
+**Features.json Error Tolerance**:
+- Dashboard parsing errors are non-fatal (ralph.ts:474-480)
+- Wrapped in try-catch with empty catch
+- Orchestration continues even if dashboard can't display features
+- Prevents JSON parse errors from halting automation
+
+**PR Existence Check Pattern**:
+- Uses `gh pr view HEAD --json url` (ralph.ts:616-624)
+- Checks for `'"url"'` substring in output (string match, not JSON parse)
+- Simple pattern avoids JSON parsing complexity for boolean check
+
 ---
 
 ## Blockers
@@ -521,7 +627,7 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 24 items | Blocking basic functionality |
+| P1 | Critical Integration | 35 items | Blocking basic functionality |
 | P2 | Dashboard Integration | 6 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
 | P4 | Robustness | 3 items | Production readiness |
@@ -533,7 +639,13 @@ P1.9 Startup Cleanup ─────► P1.1 Main Entry Point (cleanup runs FIRS
                                   │
 P1.6 Environment Validation ──────┤
                                   │
+P1.29 Create+Start Pattern ───────┤
+                                  │
                                   ├─► P1.23 Git Configuration in Container
+                                  │         │
+                                  │         └─► P1.26 --system vs --global Flag
+                                  │         │
+                                  │         └─► P1.34 Credential Helper Conditional
                                   │
                                   ├─► P1.10 Container Health Checks
                                   │
@@ -541,15 +653,25 @@ P1.6 Environment Validation ──────┤
                                   │         │
                                   │         └─► P1.13 Resume vs New Session
                                   │                   │
+                                  │                   └─► P1.31 Host-Side Branch Verification
+                                  │                   │
                                   │                   └─► P1.18 Clone Branch Selection
                                   │
                                   ├─► P1.17 Remote URL Extraction ─► Clone from remote
+                                  │         │
+                                  │         └─► P1.28 Clone via /tmp/repo
                                   │
-                                  ├─► P1.12 Features.json Copying (build mode)
+                                  ├─► P1.33 .ralph Directory Creation
+                                  │         │
+                                  │         ├─► P1.12 Features.json Copying (build mode)
+                                  │         │
+                                  │         └─► P1.15 Prompt Template Write-to-Container
                                   │
-                                  ├─► P1.15 Prompt Template Write-to-Container
+                                  ├─► P1.25 Git Author Defaults
                                   │
                                   ├─► P1.2 Firewall Ready Detection
+                                  │         │
+                                  │         └─► P1.27 30-Second Polling Timeout
                                   │         │
                                   │         └─► P1.24 Firewall Verification
                                   │
@@ -558,6 +680,8 @@ P1.6 Environment Validation ──────┤
                                   ├─► P1.4 Final Verification Logic
                                   │         │
                                   │         └─► P1.20 PR Ready Command
+                                  │         │
+                                  │         └─► P1.35 Exit Message
                                   │
                                   ├─► P1.5 Signal Handling
                                   │         │
@@ -573,9 +697,13 @@ P1.6 Environment Validation ──────┤
                                   │
                                   ├─► P1.21 Container User Switching
                                   │
+                                  ├─► P1.32 ralph-progress.txt (document only)
+                                  │
                                   └─► P1.14 Plan Mode Completion Detection
 
 P2.* Dashboard ────────────► Requires P1.1 complete first
+     │
+     ├─► P1.30 Dual Input Source Race (CLI + Dashboard)
      │
      ├─► P2.5 Interactive CLI Prompts (can test without dashboard)
      │
