@@ -6267,3 +6267,406 @@ Running totals:
 - P5 items: 84 (was 80)
 - P6 items: 76 (was 73)
 - Grand total: 747 items (was 714)
+- Grand total: 747 items (was 714)
+
+---
+
+## Iteration 26: Deep Gap Analysis
+
+### New P1 Items (Critical)
+
+P1.301 NDJSON Parser Fails on Invalid JSON Instead of Skipping ► src/streams/ndjson.ts:22-30
+  - Gap: Spec (claude-integration.md:116-118) says "skip invalid lines and continue"
+  - Implementation uses Stream.mapEffect which fails stream on first error
+  - Should use Stream.filterMap or error recovery pattern
+  - Impact: Single malformed JSON line aborts entire Claude output stream
+  - Fix: Wrap JSON.parse in Effect.option and filter None values
+
+P1.302 "interrupted" Subtype Missing from ClaudeResultEvent ► src/types.ts:117
+  - Gap: Spec (claude-integration.md:78) defines "success" | "error" | "interrupted"
+  - Implementation only has "success" | "error"
+  - Impact: Cannot properly handle interrupted Claude executions
+  - Fix: Add "interrupted" to ClaudeResultEvent.subtype union
+
+P1.303 mcp_servers Type Mismatch ► src/types.ts:86
+  - Gap: Spec defines mcp_servers: string[]
+  - Implementation uses Record<string, unknown>[]
+  - Impact: Type errors when processing init events
+  - Fix: Align type with actual Claude CLI output
+
+P1.304 Template Uses "verification" Field, Code Uses "verify_command" ► templates/ralph-instructions.md:56
+  - Gap: Template shows `"verification": "test -f ..."` 
+  - Feature interface uses `verify_command?: string`
+  - Impact: Claude writes wrong field name, verification never runs
+  - Fix: Align template with Feature interface (use verify_command)
+
+P1.305 Missing "acceptance" and "steps" Fields in Feature Interface ► src/types.ts:3-8
+  - Gap: Template shows optional "acceptance" and "steps" fields
+  - Feature interface doesn't include them
+  - Impact: TypeScript errors if features.json includes these fields
+  - Fix: Add optional fields to Feature interface
+
+P1.306 No Feature Schema Validation ► src/container.ts:42, ralph.ts:378
+  - Gap: Spec (features.md:247-248) says "exit with error" for invalid JSON
+  - Implementation uses raw JSON.parse with no validation
+  - Missing required fields not caught
+  - Impact: Runtime errors instead of clear validation messages
+  - Fix: Add schema validation with Zod or Effect Schema
+
+P1.307 DockerService.listByPrefix Searches Files Not Containers ► src/layers/DockerLive.ts:292-318
+  - Gap: Method name implies listing containers by prefix
+  - Implementation actually searches /workspace filesystem
+  - Used by cleanupStaleContainers but wrong semantics
+  - Impact: Stale container cleanup doesn't work correctly
+  - Fix: Implement actual `docker ps -a --filter name=prefix` pattern
+
+P1.308 DashboardLive Missing All Control Endpoints ► src/layers/DashboardLive.ts:112-179
+  - Gap: Only implements /events and static files
+  - Missing: /pause, /resume, /step-mode, /stop, /prompt GET/PUT
+  - These exist in src/server.ts but not in Effect layer
+  - Impact: Dashboard cannot control orchestrator through Effect implementation
+  - Fix: Port all endpoints from server.ts to DashboardLive.ts
+
+P1.309 onStopCallback Not Implemented in DashboardLive ► src/layers/DashboardLive.ts
+  - Gap: src/server.ts has setOnStopCallback() for Claude abort
+  - DashboardLive has no equivalent mechanism
+  - Impact: Stop button cannot abort Claude process
+  - Fix: Add onStopCallback mechanism to DashboardLive
+
+P1.310 Initial SSE Connection Missing Iteration/Features Events ► src/layers/DashboardLive.ts:136-140
+  - Gap: Only sends StateEvent on initial connection
+  - Spec/server.ts sends state + iteration + features events
+  - Impact: Dashboard doesn't show iteration/features on reconnect
+  - Fix: Send all three events on SSE connection
+
+P1.311 LoggingService Completely Missing ► specs/logging-telemetry.md:49-56
+  - Gap: Entire LoggingService interface not implemented
+  - No src/services/Logging.ts or src/layers/LoggingLive.ts
+  - Impact: No JSONL session persistence, no iteration recovery
+  - Fix: Implement LoggingService per spec
+
+P1.312 Iteration Metrics Not Tracked ► specs/logging-telemetry.md:89-102
+  - Gap: IterationMetrics type not defined
+  - Token usage from ClaudeResultEvent.message.usage not tracked per iteration
+  - Impact: No visibility into token consumption, context usage
+  - Fix: Add IterationMetrics type and tracking logic
+
+P1.313 /iterations and /logs/:iteration Endpoints Missing ► specs/logging-telemetry.md:272-284
+  - Gap: Neither endpoint exists in server.ts or DashboardLive
+  - Required for iteration sidebar and log replay
+  - Impact: Cannot view historical iterations in dashboard
+  - Fix: Implement both endpoints
+
+P1.314 TimeoutError Not Caught in mainLoop ► src/program.ts:241-251
+  - Gap: Claude.run() called without catching TimeoutError
+  - Spec says orchestrator should catch and increment noChangeCount
+  - Impact: Timeout propagates uncaught, crashes orchestrator
+  - Fix: Add Effect.catchTag for TimeoutError
+
+P1.315 GitHub .packages Field Not Included in Firewall ► docker/init-firewall.sh:76
+  - Gap: Spec shows (web + api + git + .packages)
+  - Implementation only uses (web + api + git)
+  - Impact: GitHub Packages CDN endpoints blocked
+  - Fix: Add .packages to jq filter
+
+P1.316 *.githubusercontent.com Not Whitelisted ► specs/networking.md:37 vs docker/init-firewall.sh
+  - Gap: Spec explicitly lists *.githubusercontent.com
+  - Not resolved or added to allowed-domains ipset
+  - Impact: Cannot fetch raw files from GitHub repos
+  - Fix: Add DNS resolution for raw.githubusercontent.com, etc.
+
+P1.317 DNS over TCP (Port 53) Not Allowed ► docker/init-firewall.sh:41-43
+  - Gap: Only UDP DNS allowed
+  - TCP needed for large responses (DNSSEC)
+  - Impact: DNS resolution may fail for some domains
+  - Fix: Add iptables rules for TCP port 53
+
+P1.318 Dashboard Event Type Mismatch ► dashboard.md:116 vs src/types.ts:133
+  - Gap: Spec says type: "claude"
+  - Implementation uses type: "claude_event"
+  - Impact: Dashboard code may not match events
+  - Fix: Align naming between spec and types.ts
+
+P1.319 maxIterations Initialized to 0 in DashboardLive ► src/layers/DashboardLive.ts:214
+  - Gap: maxIterations: 0 as initial value
+  - Should default to config value (50 per spec)
+  - Impact: Progress bar shows 0/0 until first update
+  - Fix: Pass config value to makeDashboardLive
+
+P1.320 Timeout Config Not Used ► src/program.ts:244
+  - Gap: Hardcodes timeoutMs: 10 * 60 * 1000
+  - ConfigService has timeoutMs field that's ignored
+  - Impact: Timeout not configurable at runtime
+  - Fix: Use config.timeoutMs instead of hardcoded value
+
+### New P2 Items (Architecture)
+
+P2.125 Two Server Implementations Exist ► src/server.ts vs src/layers/DashboardLive.ts
+  - Gap: server.ts has full implementation (301 lines)
+  - DashboardLive.ts is incomplete subset
+  - Unclear which is canonical
+  - Impact: Feature drift between implementations
+  - Fix: Complete DashboardLive.ts, deprecate server.ts
+
+P2.126 Test Mocks Use as any Type Assertions ► src/program.test.ts:44,90,141
+  - Gap: 15+ occurrences of `as any` in test files
+  - Bypasses type checking for mock services
+  - Impact: Mocks may drift from actual interfaces
+  - Fix: Create properly-typed mock factories in layers/test/
+
+P2.127 Console.log Used Extensively Instead of Logging Service ► ralph.ts (40+ occurrences)
+  - Gap: 40+ console.log calls for status updates
+  - No structured logging, no LoggingService integration
+  - Impact: Cannot filter/search logs, no persistence
+  - Fix: Route through LoggingService when implemented
+
+P2.128 Process.exit() Calls Bypass Effect Error Handling ► ralph.ts:89,360,367,376,395
+  - Gap: 5 direct process.exit(1) calls
+  - Bypasses Effect cleanup and error propagation
+  - Impact: Resources may not be cleaned up on exit
+  - Fix: Return Effect failures instead, handle at top level
+
+P2.129 Circuit Breaker Doesn't Track Feature Progress ► src/program.ts:295-296
+  - Gap: Only checks noChangeCount and remainingFeaturesCount
+  - Doesn't detect commits without feature completion
+  - Impact: Infinite loop if Claude pushes without completing features
+  - Fix: Track feature progress rate, not just count
+
+P2.130 ClaudeEvent Types Missing tool_result ► src/types.ts:95-102
+  - Gap: ContentBlock has text/tool_use/thinking
+  - Spec shows tool_result as separate type
+  - Flat union with optional fields not discriminated
+  - Impact: Cannot properly type tool results
+  - Fix: Add discriminated union for tool_result
+
+P2.131 Thinking Content Type Undocumented ► src/types.ts:96
+  - Gap: Implementation has "thinking" content type
+  - Not documented in claude-integration.md spec
+  - Impact: Spec/impl divergence
+  - Fix: Document thinking content type in spec
+
+### New P3 Items (Robustness)
+
+P3.93 DNS Staleness for Long-Running Containers ► docker/init-firewall.sh:92-108
+  - Gap: DNS resolved once at startup
+  - CDNs rotate IPs frequently
+  - Impact: Long-running containers lose connectivity
+  - Fix: Periodic DNS refresh or TTL-aware caching
+
+P3.94 No CNAME Chain Following ► docker/init-firewall.sh:94
+  - Gap: Only A records extracted
+  - CNAME targets not tracked
+  - Impact: Access to canonical names may fail
+  - Fix: Document behavior or follow CNAME chain
+
+P3.95 Host Network Detection Assumes /24 Subnet ► docker/init-firewall.sh:116
+  - Gap: Hardcodes .0/24 for host network
+  - Custom Docker networks use different masks
+  - Impact: Container-host communication may fail
+  - Fix: Detect actual subnet mask from route
+
+P3.96 Firewall Init Partial Failure Leaves No Connectivity ► docker/init-firewall.sh:12
+  - Gap: set -e exits on any error
+  - No cleanup of partial firewall state
+  - Impact: Failed init leaves container unreachable
+  - Fix: Add trap handler to restore default rules on failure
+
+P3.97 No Validation of Claude CLI Output Format ► src/layers/ClaudeLive.ts:87
+  - Gap: Forces --output-format stream-json
+  - No validation that response is actually NDJSON
+  - Impact: Text response would crash stream parser
+  - Fix: Detect content type or validate first line
+
+P3.98 GitHub CLI apt Repository Not Firewalled ► docker/Dockerfile.base:33-35
+  - Gap: cli.github.com used during build
+  - May resolve to IPs outside allowed GitHub ranges
+  - Impact: Runtime apt updates would fail
+  - Fix: Not critical (build-time only), document limitation
+
+### New P4 Items (Polish)
+
+P4.72 Token Usage Not Displayed in Dashboard ► specs/logging-telemetry.md:79-102
+  - Gap: ClaudeResultEvent has usage field
+  - No UI component displays token counts
+  - Impact: No visibility into token consumption
+  - Fix: Add token display to iteration cards
+
+P4.73 Cost Not Displayed in Dashboard ► src/types.ts:118
+  - Gap: cost_usd field exists in ClaudeResultEvent
+  - Not tracked or displayed
+  - Impact: No cost visibility
+  - Fix: Add cost display per iteration
+
+P4.74 Duration Not Displayed in Dashboard ► src/types.ts:119
+  - Gap: duration_ms field exists
+  - Not displayed
+  - Impact: No timing visibility
+  - Fix: Add duration display
+
+P4.75 ToolCall.tsx Component Missing ► specs/logging-telemetry.md:332-345
+  - Gap: Spec lists ToolCall.tsx as required
+  - File does not exist
+  - Impact: No structured tool call rendering
+  - Fix: Implement ToolCall component
+
+P4.76 SubagentIndicator.tsx Component Missing ► specs/logging-telemetry.md:332-345
+  - Gap: Spec lists SubagentIndicator.tsx as required
+  - File does not exist
+  - Impact: No subagent visibility in dashboard
+  - Fix: Implement SubagentIndicator component
+
+P4.77 useSessionRecovery.ts Hook Missing ► specs/logging-telemetry.md:332-345
+  - Gap: Spec lists useSessionRecovery.ts as required
+  - File does not exist
+  - Impact: No browser recovery on reconnect
+  - Fix: Implement session recovery hook
+
+P4.78 IterationSidebar.tsx Component Missing ► specs/logging-telemetry.md:332-345
+  - Gap: Spec lists IterationSidebar.tsx as required
+  - File does not exist
+  - Impact: Cannot view/switch between iterations
+  - Fix: Implement iteration sidebar
+
+### New P5 Items (Consistency)
+
+P5.85 run() vs runWithEvents() Timeout Behavior Differs ► src/layers/ClaudeLive.ts:51,118
+  - Gap: run() uses Effect.timeout(), runWithEvents() uses Stream.timeout()
+  - Spec only documents runWithEvents() timeout behavior
+  - Impact: Inconsistent timeout semantics
+  - Fix: Document both behaviors or unify approach
+
+P5.86 DockerTest Mock Doesn't Match Production Commands ► src/layers/test/DockerTest.ts:28-42
+  - Gap: Mock exec has limited command patterns
+  - Real implementation handles many more commands
+  - Impact: Tests may pass but production fails
+  - Fix: Expand mock patterns or use command recording
+
+P5.87 ClaudeTest Mock Returns Wrong Event Types ► src/layers/test/ClaudeTest.ts:13-16
+  - Gap: Mock returns simple objects
+  - Don't match ClaudeEvent types (init, assistant, result)
+  - Impact: Tests don't verify event handling
+  - Fix: Return properly-typed mock events
+
+P5.88 ICMP Rejection Method Differs from Spec ► docker/init-firewall.sh:137
+  - Gap: Spec shows icmp-port-unreachable
+  - Impl uses icmp-admin-prohibited
+  - Actually better, but inconsistent with spec
+  - Fix: Update spec to match (admin-prohibited is correct)
+
+### New P6 Items (Minor)
+
+P6.77 Prompt Rerun Endpoint Not Implemented ► specs/logging-telemetry.md:244-254
+  - Gap: POST /rerun specified for prompt iteration
+  - Endpoint doesn't exist
+  - Low priority feature
+  - Impact: Cannot re-run with modified prompts
+  - Fix: Implement when needed
+
+P6.78 bun.sh Not Whitelisted for Runtime Updates ► docker/init-firewall.sh
+  - Gap: bun.sh used in Dockerfile build
+  - Not whitelisted for container runtime
+  - Impact: Cannot update Bun inside container
+  - Low priority (version pinned at build)
+  - Fix: Document or add if needed
+
+P6.79 claude.ai Not Whitelisted ► docker/init-firewall.sh
+  - Gap: Claude installer from claude.ai during build
+  - Not whitelisted for runtime
+  - Impact: Cannot update Claude CLI inside container
+  - Low priority (version pinned at build)
+  - Fix: Document limitation
+
+### New P7 Items (Test Coverage)
+
+P7.1 createSession Function Has No Tests ► src/program.ts:23-200
+  - Gap: 177-line function with 8 distinct steps
+  - Only runIteration and mainLoop tested
+  - Impact: Container setup may silently break
+  - Fix: Add integration tests for createSession
+
+P7.2 DockerLive Layer Has No Tests ► src/layers/DockerLive.ts (325 lines)
+  - Gap: All Docker operations untested
+  - Only tested indirectly through program.test.ts
+  - Impact: Docker API changes may break silently
+  - Fix: Add unit tests for each Docker method
+
+P7.3 ClaudeLive Layer Has No Tests ► src/layers/ClaudeLive.ts (138 lines)
+  - Gap: Claude CLI integration untested
+  - Impact: Claude CLI changes may break silently
+  - Fix: Add tests for argument building, timeout, streaming
+
+P7.4 GitLive Layer Has No Tests ► src/layers/GitLive.ts (141 lines)
+  - Gap: Git operations untested
+  - Impact: Git behavior changes may break silently
+  - Fix: Add tests for each git method
+
+P7.5 ConfigLive Layer Has No Tests ► src/layers/ConfigLive.ts (68 lines)
+  - Gap: Environment variable handling untested
+  - Impact: Config loading may silently fail
+  - Fix: Add tests for env var validation
+
+P7.6 DashboardLive Layer Has No Tests ► src/layers/DashboardLive.ts (217 lines)
+  - Gap: SSE server, state management untested
+  - Impact: Dashboard may break silently
+  - Fix: Add SSE and endpoint tests
+
+P7.7 server.ts Has No Tests ► src/server.ts (301 lines)
+  - Gap: Full dashboard server untested
+  - Impact: HTTP endpoints may break
+  - Fix: Add endpoint tests
+
+P7.8 Stream Utilities Partially Tested ► src/streams/ndjson.ts
+  - Gap: parseNDJSONWithFallback, fromReadableStream, collectAll, forEach untested
+  - Only parseNDJSON has tests
+  - Impact: Stream utilities may have bugs
+  - Fix: Add tests for all exported functions
+
+P7.9 main.ts Entry Point Has No Tests ► src/main.ts (68 lines)
+  - Gap: Entry point logic untested
+  - Impact: Startup may fail silently
+  - Fix: Add integration tests
+
+P7.10 Feature Schema Validation Not Tested ► src/container.ts:41-44
+  - Gap: No validation logic exists to test
+  - Impact: Invalid features.json not caught
+  - Fix: First implement validation (P1.306), then test
+
+---
+
+Iteration 26 Dependency Graph:
+P1.301 NDJSON Parser ───────────────────► Stream reliability
+P1.302-303 Event Types ─────────────────► Type safety
+P1.304-306 Feature Schema ──────────────► Feature verification
+P1.307 listByPrefix ────────────────────► P1.9 Startup Cleanup
+P1.308-310 Dashboard Endpoints ─────────► P4.75-78 Dashboard UI
+P1.311-313 Logging System ──────────────► Full spec compliance
+P1.314 TimeoutError ────────────────────► Error handling
+P1.315-317 Firewall ────────────────────► Network security
+P1.318-320 Config/Types ────────────────► Correctness
+
+P2.125-131 Architecture ────────────────► Code quality
+P3.93-98 Robustness ────────────────────► Reliability
+P4.72-78 Dashboard UI ──────────────────► User experience
+P5.85-88 Consistency ───────────────────► Maintainability
+P6.77-79 Minor ─────────────────────────► Future features
+P7.1-10 Test Coverage ──────────────────► Quality assurance
+
+Summary (Iteration 26):
+- 20 new P1 items (P1.301-P1.320) - Critical gaps from deep analysis
+- 7 new P2 items (P2.125-P2.131) - Architecture issues
+- 6 new P3 items (P3.93-P3.98) - Robustness gaps
+- 7 new P4 items (P4.72-P4.78) - Dashboard polish
+- 4 new P5 items (P5.85-P5.88) - Consistency issues
+- 3 new P6 items (P6.77-P6.79) - Minor issues
+- 10 new P7 items (P7.1-P7.10) - Test coverage (new category)
+- Total new items: 57
+
+Running totals:
+- P1 items: 320 (was 300)
+- P2 items: 131 (was 124)
+- P3 items: 98 (was 92)
+- P4 items: 78 (was 71)
+- P5 items: 88 (was 84)
+- P6 items: 79 (was 76)
+- P7 items: 10 (new category)
+- Grand total: 804 items (was 747)
