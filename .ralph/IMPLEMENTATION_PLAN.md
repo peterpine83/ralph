@@ -37,8 +37,11 @@
 ### 1.1 Main Entry Point Integration
 - [ ] Wire createSession() to main.ts (refs: src/main.ts:17-58, src/program.ts:23-200)
   - Currently uses placeholder values instead of actual session creation
+  - main.ts:29-30 - Comment says "placeholder" with hardcoded `ralph-session-placeholder`
+  - main.ts:38-50 - Hardcoded `placeholderState` object with empty defaults
+  - main.ts:56-58 - Calls mainLoop with placeholders instead of real session
   - Production flow: parseArgs → validateEnvironment → createSession → mainLoop → cleanup
-  - Remove hardcoded `placeholderContainerName`, `placeholderPrompt`, `placeholderState`
+  - Reference working flow in ralph.ts:349-400 for expected pattern
   - Fix type annotation at line 67 (`as Effect.Effect<void, never, never>`)
   - Add cleanup in finally block (container removal via DockerService.remove())
   - Implement proper error handling with catchTags for fatal vs recoverable errors
@@ -71,9 +74,10 @@
   - Add signal handlers in main.ts before starting orchestration
 
 ### 1.6 Environment Variable Validation
-- [ ] Validate required environment on startup (refs: specs/orchestrator.md:197-203)
+- [ ] Validate required environment on startup (refs: specs/orchestrator.md:197-203, src/layers/ConfigLive.ts:35-47)
   - `CLAUDE_CODE_OAUTH_TOKEN` - Required, error if missing
-  - `GITHUB_TOKEN` - Auto-detect via `gh auth token` if not set
+  - Add `ANTHROPIC_API_KEY` fallback (ralph.ts:358 accepts either, ConfigLive:35 only checks OAuth)
+  - `GITHUB_TOKEN` - Auto-detect via `gh auth token` if not set (ralph.ts:161, missing in ConfigLive:45)
   - Validate before starting container to fail fast
   - Clear error messages for missing credentials
 
@@ -82,6 +86,12 @@
   - `--once` flag parsed but not wired to mainLoop
   - When enabled, run exactly one iteration then exit
   - Should still respect circuit breaker and cleanup
+
+### 1.8 maxIterations Enforcement
+- [ ] Enforce max iteration limit in mainLoop (refs: src/args.ts:7, src/program.ts:295-297)
+  - `maxIterations` parsed at args.ts:35-37 but never checked in loop
+  - Add to loop condition: `state.iteration < maxIterations`
+  - Currently circuit breaker (3 no-change) is only exit besides feature completion
 
 ---
 
@@ -250,15 +260,24 @@
 - Effect-based: `/workspace/src/layers/DashboardLive.ts` - Effect.Ref, scoped lifecycle
 - Need to consolidate to single implementation
 
+### Dual Orchestration Implementations (Critical)
+- Legacy: `/workspace/ralph.ts` - Active, used in production, ~650 lines
+  - Has working: signal handling, firewall detection, step mode, event streaming
+  - Uses: Bun.spawn, Bun.$, direct process management
+- Effect-based: `/workspace/src/main.ts` + `/workspace/src/program.ts` - In development
+  - Has working: service interfaces, layer composition, test infrastructure
+  - Missing: wiring to createSession, cleanup, signal handling, step mode
+- The Effect implementation needs to replicate all working features from ralph.ts
+
 ### Branch Naming Logic Exists
 - `generateContainerName()` in `/workspace/src/container.ts` generates timestamps
 - Pattern available but not wired to main.ts branch creation
 - Container naming uses `ralph-session-{timestamp}` pattern
 
 ### CLI Args Parsed but Not Used
-- `--once` flag parsed at src/args.ts:26 but not checked in mainLoop
-- `stepMode` parsed but not integrated with iteration pause logic
-- `maxIterations` parsed but mainLoop doesn't respect it (uses circuit breaker instead)
+- `--once` flag parsed at src/args.ts:33-34 but not checked in mainLoop (see P1.7)
+- `stepMode` parsed at src/args.ts:40 but not integrated with iteration pause logic (see P2.3)
+- `maxIterations` parsed at src/args.ts:35-37 but loop condition at program.ts:295-297 doesn't check it (see P1.8)
 
 ### Model Always Hardcoded to Opus
 - ClaudeLive.ts lines 27 and 76 always use `claude-opus-4-5-20251101`
@@ -306,7 +325,7 @@ Per specs/features.md, Claude must run full CI suite (typecheck, tests, build) b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 7 items | Blocking basic functionality |
+| P1 | Critical Integration | 8 items | Blocking basic functionality |
 | P2 | Dashboard Integration | 4 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
 | P4 | Robustness | 5 items | Production readiness |
@@ -324,7 +343,9 @@ P1.1 Main Entry Point ─────┬─► P1.5 Signal Handling
      │
      ├─► P1.6 Environment Validation
      │
-     └─► P1.7 --once Flag Handling
+     ├─► P1.7 --once Flag Handling
+     │
+     └─► P1.8 maxIterations Enforcement
 
 P2.* Dashboard ────────────► Requires P1.1 complete first
 
