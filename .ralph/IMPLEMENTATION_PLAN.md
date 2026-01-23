@@ -1025,6 +1025,88 @@
   - But P1.139 shows program.ts mounts to /root/.ssh, not /home/node/.ssh
   - Complete SSH chain is broken: wrong mount → no copy → no key at /tmp/.ssh
 
+### 1.143 Environment Variable Injection in Docker Volume Mounts (NEW - Jan 2026 Iteration 11)
+- [ ] Validate HOME environment variable before volume mount interpolation (refs: program.ts:37-38) (SECURITY)
+  - **HIGH SEVERITY**: `process.env.HOME` directly interpolated without validation
+  - Attack: Setting `HOME=/etc` before running Ralph exposes sensitive system files
+  - Volume mounts are read-only which limits damage but still exposes sensitive data
+  - Fix: Validate HOME is safe path within expected user directories
+
+### 1.144 Shell Injection in ralph.ts Docker Create (NEW - Jan 2026 Iteration 11)
+- [ ] Escape environment variables in Docker create command (refs: ralph.ts:164-177) (SECURITY)
+  - **HIGH SEVERITY**: Multiple env vars interpolated without escaping in Bun template
+  - `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` could contain shell metacharacters
+  - Attack: `GIT_AUTHOR_NAME='Alice"; docker exec... ; echo "'` breaks out of -e flag
+  - Fix: Use array-based command or escape all env values
+
+### 1.145 Race Condition in Firewall Initialization (NEW - Jan 2026 Iteration 11)
+- [ ] Replace hardcoded 3-second sleep with actual firewall detection (refs: program.ts:75) (SECURITY)
+  - **MEDIUM SEVERITY**: 3-second sleep may not be enough on slow systems
+  - Network operations could execute before firewall rules applied
+  - Claude could access blocked domains during race window
+  - Fix: Implement log streaming as TODO suggests
+
+### 1.146 GitHub API Response Injection Risk (NEW - Jan 2026 Iteration 11)
+- [ ] Validate GitHub API response before firewall configuration (refs: docker/init-firewall.sh:57) (SECURITY)
+  - **MEDIUM SEVERITY**: curl response passed directly to jq without schema validation
+  - MITM attack before firewall applied could inject malicious IP ranges
+  - Fix: Add TLS verification, validate JSON schema, bundle known-good IP fallback
+
+### 1.147 Path Traversal in Dashboard Static File Serving (NEW - Jan 2026 Iteration 11)
+- [ ] Sanitize pathname before file serving (refs: DashboardLive.ts:167-168) (SECURITY)
+  - **MEDIUM SEVERITY**: filePath from URL pathname concatenated without sanitization
+  - Attack: `/../../../etc/passwd` could read files outside dashboard directory
+  - Distinct from P1.127 which covers readFile/writeFile, not static serving
+  - Fix: Remove `..` sequences, validate path starts with `/`
+
+### 1.148 Unvalidated Session ID in Container Name Generation (NEW - Jan 2026 Iteration 11)
+- [ ] Validate sessionId parameter in generateContainerName (refs: container.ts:19-20) (SECURITY)
+  - **MEDIUM SEVERITY**: sessionId parameter directly interpolated without validation
+  - API contract allows malicious input even if current usage is safe
+  - Attack: `sessionId = "test; rm -rf /"` if passed to shell commands
+  - Fix: Validate against regex `^[a-zA-Z0-9-]+$`
+
+### 1.149 Dashboard Broadcast Missing in Orchestration Loop (NEW - Jan 2026 Iteration 11)
+- [ ] Wire DashboardService to mainLoop for state updates (refs: specs/orchestrator.md:244, program.ts:214-335)
+  - **CRITICAL**: program.ts has no DashboardService imports or calls
+  - Dashboard receives no iteration progress updates
+  - Spec requires: DashboardService.updateState(), DashboardService.broadcast()
+  - Blocks real-time dashboard functionality
+
+### 1.150 Error Recovery Strategy Not Implemented (NEW - Jan 2026 Iteration 11)
+- [ ] Implement error-specific recovery with retry/continue (refs: specs/orchestrator.md:231-233, program.ts:214-266)
+  - **CRITICAL**: Spec defines recoverable errors with specific behaviors
+  - DockerError: retry with backoff
+  - TimeoutError: continue to next iteration
+  - GitError: log and continue
+  - Current program.ts has no retry logic, errors terminate loop
+
+### 1.151 Dashboard State running=false in Cleanup (NEW - Jan 2026 Iteration 11)
+- [ ] Update dashboard state to running=false in cleanup (refs: specs/orchestrator.md:49-50, main.ts)
+  - Spec requires cleanup flow to update dashboard state
+  - main.ts has no dashboard state management
+  - Affects P1.149 - part of dashboard integration gap
+
+### 1.152 Step Mode Checkpoint Not in mainLoop (NEW - Jan 2026 Iteration 11)
+- [ ] Add step mode pause/resume logic to mainLoop (refs: specs/orchestrator.md:147-152, program.ts:300-319)
+  - Spec requires pausing after each iteration when step mode enabled
+  - CLI prompt or dashboard resume expected
+  - Current mainLoop has no step mode checkpoint logic
+  - Elevating from P2.3 as critical for orchestration completeness
+
+### 1.153 Structured Error Handling with catchTag Missing (NEW - Jan 2026 Iteration 11)
+- [ ] Use Effect.catchTags instead of catchAll in main.ts (refs: specs/orchestrator.md:223-234, main.ts:64)
+  - Spec requires typed error channels with catchTag pattern matching
+  - Current main.ts uses catchAll which loses type information
+  - Cannot discriminate fatal vs recoverable errors
+  - Fix: Add specific catchTags for each error type
+
+### 1.154 Iteration State Missing containerName (NEW - Jan 2026 Iteration 11)
+- [ ] Add containerName to Effect.iterate state object (refs: specs/orchestrator.md:207-210, program.ts:291)
+  - Spec shows orchestrator state includes containerName
+  - Current state: `{ iteration, noChangeCount, remainingFeaturesCount }`
+  - Container name passed as parameter but not tracked in state
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -1339,6 +1421,51 @@
   - No component for editing prompts and triggering re-runs
   - Even if /rerun endpoint existed, no UI to call it
   - Requires editable textarea and "Run" button
+
+### 2.50 Terminal.tsx Component is Dead Code (NEW - Jan 2026 Iteration 11)
+- [ ] Remove unused Terminal.tsx component (refs: dashboard/src/components/Terminal.tsx:1-93)
+  - Fully implemented xterm.js terminal component
+  - Not imported or used anywhere in dashboard
+  - ActivityLog.tsx is used instead for Claude output
+  - Related: Remove unused @xterm/xterm and @xterm/addon-fit dependencies from package.json:14-15
+
+### 2.51 Prompt Template Editing UI Missing (NEW - Jan 2026 Iteration 11)
+- [ ] Create UI for GET/PUT /prompt endpoints (refs: specs/dashboard.md:201-205, server.ts:266-280)
+  - Backend endpoints implemented in server.ts
+  - No UI component exists to display or edit prompt template
+  - Users cannot interact with prompt endpoints from browser
+
+### 2.52 tool_result Content Block Not Handled (NEW - Jan 2026 Iteration 11)
+- [ ] Add tool_result handling to ActivityLog (refs: specs/claude-integration.md:73, ActivityLog.tsx:48-80)
+  - ActivityLog only processes thinking, text, and tool_use blocks
+  - tool_result events are silently skipped with no display
+  - Spec shows tool_result as valid content block type
+  - Events lost without user visibility
+
+### 2.53 Iteration Display Missing Feature Name (NEW - Jan 2026 Iteration 11)
+- [ ] Show feature name in iteration display (refs: specs/logging-telemetry.md:84, App.tsx:62-63)
+  - Spec: "Iteration N (or feature name if available)"
+  - Current implementation only shows numeric iteration count
+  - No feature name displayed when available
+
+### 2.54 ClaudeMessageEvent.usage Type Mismatch (NEW - Jan 2026 Iteration 11)
+- [ ] Fix dashboard type definition for usage field (refs: dashboard/src/types.ts:71-76, specs/claude-integration.md:76-88)
+  - Dashboard includes usage field in ClaudeMessageEvent.message
+  - Spec says only ClaudeResultEvent contains cost/usage data
+  - Type duplication may cause confusion
+
+### 2.55 No Context Window Constant in Dashboard (NEW - Jan 2026 Iteration 11)
+- [ ] Define CONTEXT_WINDOW_SIZE constant (refs: specs/logging-telemetry.md:99,362-363)
+  - Spec recommends hardcoding 200k for metrics calculations
+  - No such constant exists in dashboard/src/
+  - Needed for iteration metrics display
+
+### 2.56 SSE Reconnect Lacks Exponential Backoff (NEW - Jan 2026 Iteration 11)
+- [ ] Add backoff to SSE reconnection (refs: specs/dashboard.md:277-278, useSSE.ts:26-32)
+  - Current: Fixed 1-second reconnect on error
+  - No exponential backoff or max retry limit
+  - Server down causes reconnect hammering every second
+  - Fix: Add exponential backoff with max retries
 
 ---
 
@@ -1805,6 +1932,85 @@
   - Verify graceful handling (return false, not error)
   - Test edge cases during container setup
 
+### 5.27 ClaudeLive Prompt Shell Escaping Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test prompt escaping in ClaudeLive.ts:41 (SECURITY)
+  - **P0 SECURITY**: Double quotes in prompt not escaped before shell execution
+  - Test prompts containing: `"`, `` ` ``, `$()`, `${}`
+  - Verify shell metacharacters don't break out of quote context
+  - Part of security test suite
+
+### 5.28 DockerLive.listByPrefix Shell Injection Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test prefix parameter escaping (refs: DockerLive.ts:296) (SECURITY)
+  - **P0 SECURITY**: Single quotes in prefix can break out of find command
+  - Test prefixes: `foo'; rm -rf /; echo '`, `foo\`whoami\``, `foo$(cat /etc/passwd)`
+  - Verify command construction is safe
+
+### 5.29 DockerLive.exec User Parameter Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test user parameter validation (refs: DockerLive.ts:206-219)
+  - No validation that user string is safe
+  - Test users: `node; whoami`, `node\`echo hi\``, `node$(id)`
+  - Should reject or escape invalid values
+
+### 5.30 parseNDJSONWithFallback Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Add tests for parseNDJSONWithFallback (refs: ndjson.ts:41-60)
+  - **0% coverage** despite being exported utility
+  - Test mixed valid/invalid JSON handling
+  - Verify discriminated union types { json: T } | { text: string }
+
+### 5.31 fromReadableStream Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Add tests for WHATWG stream conversion (refs: ndjson.ts:68-79)
+  - **0% coverage** on exported utility
+  - Test error mapping to StreamError
+  - Test stream consumption completes properly
+
+### 5.32 collectAll Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Add tests for stream collection utility (refs: ndjson.ts:86-89)
+  - **0% coverage** on exported utility
+  - Test memory behavior with large streams
+  - Test error propagation
+
+### 5.33 forEach Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Add tests for side-effecting stream consumption (refs: ndjson.ts:97-101)
+  - **0% coverage** on exported utility
+  - Test callback invocation for each element
+  - Test error propagation from callback
+
+### 5.34 ConfigLive Git Root Error Path Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test git command failure handling (refs: ConfigLive.ts:14-25)
+  - Test ConfigError when not in git repo
+  - Test permission denied scenarios
+  - Verify error messages are helpful
+
+### 5.35 Server.ts Set Mutation During Iteration Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test broadcast during client disconnect (refs: server.ts:34-39)
+  - **Correctness bug**: Set.delete during iteration is undefined behavior
+  - Test 5 clients, client 3 throws on enqueue
+  - Verify clients 4 and 5 still receive event
+
+### 5.36 DockerLive.writeFile Large Content Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test large content writes (refs: DockerLive.ts:265-288)
+  - Test 100KB+ content through stdin stream
+  - Verify stream closes properly
+  - Test backpressure handling
+
+### 5.37 main.ts Entry Point Error Handling Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test error formatting in main.ts (refs: main.ts:62-68)
+  - Test different error types (ConfigError, DockerError, etc.)
+  - Verify error messages formatted correctly
+  - Verify exit codes
+
+### 5.38 Server.ts CORS Preflight Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test OPTIONS request handling (refs: server.ts:284-292)
+  - Verify correct CORS headers returned
+  - Test all endpoints support OPTIONS
+  - Required for cross-origin dashboard scenarios
+
+### 5.39 ClaudeLive.runWithEvents Mid-Stream Timeout Tests (NEW - Jan 2026 Iteration 11)
+- [ ] Test timeout during active streaming (refs: ClaudeLive.ts:118)
+  - Mock stream emitting 3 events then hanging
+  - Verify TimeoutError thrown (not ClaudeError)
+  - Verify partial results discarded
+
 ---
 
 ## Priority 6: Dashboard & Streaming Integration Gaps
@@ -2021,6 +2227,28 @@
 ---
 
 ## Discoveries
+
+### Iteration 11 Key Discoveries (Jan 2026)
+
+**Security Vulnerabilities Require Immediate Attention**:
+- 2 HIGH severity: P1.143 (volume mount injection), P1.144 (ralph.ts Docker create)
+- 4 MEDIUM severity: P1.145-P1.148 (firewall race, API injection, path traversal, sessionId)
+- Combined with existing 5 CRITICAL (P1.49, P1.81, P1.82, P1.118, P1.119) = 11 security issues total
+
+**Test Coverage Analysis (P0-P3)**:
+- 2 P0 (CRITICAL security): ClaudeLive prompt escaping, DockerLive.listByPrefix injection
+- 4 stream utilities with 0% coverage: parseNDJSONWithFallback, fromReadableStream, collectAll, forEach
+- Server.ts Set mutation during iteration is undefined JavaScript behavior
+
+**Orchestrator Integration Gaps**:
+- Dashboard broadcast completely missing from program.ts mainLoop
+- Error recovery strategy per spec not implemented (DockerError retry, TimeoutError continue)
+- Step mode checkpoint logic not in mainLoop despite being parsed from CLI
+
+**Dashboard Dead Code**:
+- Terminal.tsx with xterm.js fully implemented but never used
+- @xterm/xterm and @xterm/addon-fit dependencies can be removed
+- ActivityLog.tsx is the actual implementation, Terminal.tsx is orphaned
 
 ### Existing Utilities (src/lib equivalent)
 - `/workspace/src/streams/ndjson.ts` - Comprehensive NDJSON parsing with error handling
@@ -2346,16 +2574,46 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 10)
+### Priority Summary (Updated Jan 2026 - Iteration 11)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 142 items | Blocking basic functionality (includes 5 CRITICAL security: P1.49, P1.81, P1.82, P1.118, P1.119; 3 verified complete; 16 new items from iteration 10) |
-| P2 | Dashboard Integration | 49 items | Core UX features (16 new dashboard/UI gaps from iteration 10) |
+| P1 | Critical Integration | 154 items | Blocking basic functionality (includes 7 CRITICAL security: P1.49, P1.81, P1.82, P1.118, P1.119, P1.143, P1.144; 3 verified complete; 12 new items from iteration 11) |
+| P2 | Dashboard Integration | 56 items | Core UX features (7 new dashboard/UI gaps from iteration 11) |
 | P3 | Missing Functionality | 23 items | Logging/telemetry subsystem + streaming |
 | P4 | Robustness | 20 items | Production readiness |
-| P5 | Test Coverage | 26 items | Quality assurance (4 new from iteration 10) |
+| P5 | Test Coverage | 39 items | Quality assurance (13 new test gaps from iteration 11, including 2 P0 security tests) |
 | P6 | Dashboard & Streaming Integration | 33 items | Event streaming, state sync, lifecycle |
-| **Total** | | **293 items** | ~35% complete |
+| **Total** | | **325 items** | ~35% complete |
+
+**Key Findings Iteration 11 (Jan 2026 - Parallel 4-Agent Research)**:
+- **NEW P1.143-P1.154**: 12 new P1 items from comprehensive 4-agent parallel analysis
+  - P1.143: Environment variable injection in volume mounts (HIGH SECURITY)
+  - P1.144: Shell injection in ralph.ts Docker create (HIGH SECURITY)
+  - P1.145: Race condition in firewall initialization (MEDIUM SECURITY)
+  - P1.146: GitHub API response injection risk (MEDIUM SECURITY)
+  - P1.147: Path traversal in dashboard static file serving (MEDIUM SECURITY)
+  - P1.148: Unvalidated sessionId in container name generation (MEDIUM SECURITY)
+  - P1.149: Dashboard broadcast missing in orchestration loop (CRITICAL)
+  - P1.150: Error recovery strategy not implemented (CRITICAL)
+  - P1.151: Dashboard state running=false in cleanup missing
+  - P1.152: Step mode checkpoint not in mainLoop
+  - P1.153: Structured error handling with catchTag missing
+  - P1.154: Iteration state missing containerName
+- **NEW P2.50-P2.56**: 7 new P2 items from dashboard component analysis
+  - P2.50: Terminal.tsx is dead code (unused xterm component)
+  - P2.51: Prompt template editing UI missing
+  - P2.52: tool_result content block not handled in ActivityLog
+  - P2.53: Iteration display missing feature name
+  - P2.54: ClaudeMessageEvent.usage type mismatch
+  - P2.55: No context window constant in dashboard
+  - P2.56: SSE reconnect lacks exponential backoff
+- **NEW P5.27-P5.39**: 13 new test coverage gaps
+  - P5.27-P5.28: P0 security tests for shell injection (ClaudeLive prompt, DockerLive prefix)
+  - P5.29: DockerLive.exec user parameter validation tests
+  - P5.30-P5.33: Stream utility tests (parseNDJSONWithFallback, fromReadableStream, collectAll, forEach)
+  - P5.34-P5.39: Error path, CORS, timeout, and entry point tests
+- **Security Analysis**: 6 new security vulnerabilities identified (2 HIGH, 4 MEDIUM severity)
+- **Test Analysis**: Identified 2 P0 (security), 7 P2 (correctness), 12 P3 (utilities) test gaps
 
 **Key Findings Iteration 10 (Jan 2026 - Parallel 3-Agent Research)**:
 - **NEW P1.127-P1.142**: 16 new P1 items from comprehensive gap analysis
