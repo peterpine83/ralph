@@ -5028,3 +5028,95 @@ Running totals:
 - P6 items: 66 (was 63)
 - Grand total: 598 items (was 559)
 ```
+
+---
+
+## Iteration 20 Research (Jan 2026)
+
+### New P2 Items (Architecture Issues)
+
+P2.100 Vite Proxy Configuration Incomplete ► dashboard/vite.config.ts:10-15
+  - Gap: Only proxies `/events`, `/pause`, `/resume`, `/prompt`
+  - Missing: `/step-mode` used at useSSE.ts:48, `/stop` used at useSSE.ts:56
+  - Impact: Dev mode (`bun run dev`) step-mode and stop buttons fail with 404
+  - Fix: Add `/step-mode` and `/stop` to proxy configuration
+
+P2.101 Dual Dashboard Implementations Not Integrated ► src/server.ts vs src/layers/DashboardLive.ts
+  - Gap: Two separate dashboard implementations exist
+  - server.ts: Mutable global state, standalone functions (lines 6-21)
+  - DashboardLive.ts: Effect-based with Ref state management
+  - Neither integrated with orchestrator (main.ts, program.ts)
+  - Impact: Dashboard exists but disconnected from orchestration
+  - Fix: Choose one implementation and wire to orchestrator
+
+### New P3 Items (Robustness)
+
+P3.61 Empty Catch Blocks Missing Error Context ► Multiple files
+  - DashboardLive.ts:31 - "Client disconnected" no cleanup
+  - server.ts:37-39 - Deletes client without logging
+  - server.ts:205-209 - Assumes all errors mean "dashboard not built"
+  - ndjson.ts:55-58 - Silent JSON parse failure
+  - Impact: Debugging production issues difficult without error context
+  - Fix: Add logging or more specific error handling
+
+P3.62 SessionConfig Interface Has 8 Unused Properties ► src/container.ts:3-14 vs src/program.ts:23-200
+  - Interface defines: gitRoot, branch, isResume, githubToken, claudeOAuthToken, gitAuthorName, gitAuthorEmail, sshDir, claudeDir, gitconfigPath
+  - createSession only uses: branch, gitRoot, isResume
+  - Tokens read from config.oauthToken/githubToken instead
+  - Volume paths hardcoded at program.ts:37-39
+  - Impact: Interface suggests features that don't exist
+  - Fix: Either use properties or remove from interface
+
+### New P5 Items (Consistency)
+
+P5.69 Layer Composition Uses Mixed Patterns ► src/layers/index.ts:28-40
+  - Uses Layer.mergeAll for first group (lines 33-36)
+  - Then chained Layer.provideMerge (lines 38-39)
+  - Not incorrect, but obscures dependency relationships
+  - Fix: Standardize on consistent composition pattern
+
+P5.70 Test Mocks Using `as any` Pattern ► program.test.ts, ClaudeTest.ts, GitTest.ts, DashboardTest.ts
+  - 20+ instances of `as any` to work around Context.Tag interface
+  - Comments reference "Context.Tag interface/class shadowing issue"
+  - Consistent pattern but indicates possible type system workaround needed
+  - Informational: Document workaround rationale
+
+### New P6 Items (Minor)
+
+P6.67 server.ts May Be Orphaned Code ► src/server.ts
+  - Full dashboard implementation (299 lines) with mutable state
+  - Not imported in main.ts or program.ts
+  - May be older implementation before Effect migration
+  - Investigate: Is this dead code or intentionally separate?
+
+P6.68 parseStaleContainers/parseContainerRunning Only Used in Tests ► src/container.ts:27-36
+  - Functions exist and tested but not used in production code
+  - DockerLive.inspect() parses output directly at lines 137-205
+  - Low priority: Either integrate utilities or document as test helpers
+
+---
+
+Iteration 20 Dependency Graph Additions:
+P2.100-101 Dashboard Integration ────► Critical for real dashboard usage
+  └─ P2.100 Vite Proxy ──────────────► Dev mode functionality
+  └─ P2.101 Implementation Choice ───► Architecture decision needed
+
+P3.61-62 Robustness ─────────────────► Error handling and interface clarity
+P5.69-70 Consistency ────────────────► Code organization
+P6.67-68 Minor ──────────────────────► Dead code investigation
+
+Summary (Iteration 20):
+- 2 new P2 items (P2.100-P2.101) - Dashboard integration issues
+- 2 new P3 items (P3.61-P3.62) - Robustness improvements
+- 2 new P5 items (P5.69-P5.70) - Consistency patterns
+- 2 new P6 items (P6.67-P6.68) - Minor investigations
+- Total new items: 8
+
+Running totals:
+- P1 items: 249 (unchanged)
+- P2 items: 101 (was 99)
+- P3 items: 62 (was 60)
+- P4 items: 56 (unchanged)
+- P5 items: 70 (was 68)
+- P6 items: 68 (was 66)
+- Grand total: 606 items (was 598)
