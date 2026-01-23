@@ -3493,4 +3493,276 @@ P5.38 Service Layer Tests ─────────► P5.27-P5.32 Integration
 P6.38 as any Workarounds ──────────► Effect architecture
 P6.39-P6.40 Type Inconsistency ────► Error type consolidation
 P6.41 Error Truncation ────────────► P4.6 JSONL Parse Tolerance
+
+New P1 Items (Jan 2026 - Iteration 14):
+P1.166 No Stale Container Cleanup at Startup ► src/program.ts, src/main.ts
+  - Spec requires cleanupStaleContainers() at startup (specs/orchestrator.md:12)
+  - Legacy ralph.ts:136-142 implements this correctly
+  - Effect-based src/main.ts has no cleanup before createSession
+  - parseStaleContainers() utility at src/container.ts:27-29 exists but unused
+  - Add stale container detection and removal before session creation
+
+P1.167 DockerService.listByPrefix Lists Files Not Containers ► DockerLive.ts:292-318
+  - Spec expects listByPrefix() to list containers by name (specs/orchestrator.md:59)
+  - Implementation at DockerLive.ts:292-318 lists files inside a container
+  - Comment at Docker.ts:118 says "List files in a container by prefix"
+  - Need new method listContainersByPrefix(prefix: string) in DockerService
+  - Use `docker ps -a --filter name=...` pattern from ralph.ts:137
+
+P1.168 No Cleanup in Finally Block ► src/main.ts:52-68, src/program.ts:283-335
+  - Spec requires cleanupSession(containerName) in finally (specs/orchestrator.md:50)
+  - Legacy ralph.ts:628-635 implements finally block with cleanup
+  - Effect-based main.ts/program.ts have no finally block
+  - Container left running after orchestration completes or fails
+  - Add Effect.ensuring() or Effect.acquireRelease pattern for cleanup
+
+P1.169 No Container Health Check Per Iteration ► src/program.ts:283-335
+  - Spec requires ensureContainerRunning() each iteration (specs/orchestrator.md:29)
+  - Legacy ralph.ts:461 checks container before each iteration
+  - Legacy ralph.ts:144-152 implements restart on stopped container
+  - Effect-based mainLoop has no health check
+  - parseContainerRunning() at container.ts:34-36 exists but unused
+
+P1.170 Missing finalVerificationDone State ► src/program.ts:289-291
+  - Spec requires finalVerificationDone tracking (specs/orchestrator.md:129)
+  - Legacy ralph.ts:430,484-491,566 implements full logic
+  - Effect.iterate state at program.ts:291 only has: iteration, noChangeCount, remainingFeaturesCount
+  - Won't run final verification iteration when all features pass
+  - Add finalVerificationDone boolean to state and implement logic
+
+P1.171 Missing Dashboard Integration in mainLoop ► src/program.ts:283-335
+  - Spec requires DashboardService.updateState() calls (specs/orchestrator.md:244)
+  - Legacy ralph.ts:477-478 broadcasts features and iteration via updateFeatures/updateIteration
+  - Effect mainLoop never accesses DashboardService
+  - No calls to dashboard.setIteration(), dashboard.setFeatures(), etc.
+  - Dashboard won't update during orchestration
+
+P1.172 Missing Step Mode in mainLoop ► src/program.ts:283-335
+  - Spec requires step mode checkpoint after iterations (specs/orchestrator.md:147-152)
+  - Legacy ralph.ts:572-606 implements step mode with CLI prompt and dashboard pause
+  - Effect mainLoop has no step mode logic
+  - No pausing between iterations, no user prompts
+
+P1.173 Timeout Errors Should Continue Not Abort ► src/program.ts:241-251
+  - Spec says TimeoutError → increment noChangeCount, continue (specs/orchestrator.md:232)
+  - Current code: if Claude times out, Effect fails and propagates up
+  - Should catch TimeoutError, increment noChangeCount, continue to next iteration
+  - Add Effect.catchTag("TimeoutError") in runIteration
+
+P1.174 Missing Max Iterations Check ► src/program.ts:295-297
+  - Spec default: --max-iterations 50 (specs/orchestrator.md:181)
+  - Legacy ralph.ts:453-456 enforces max iterations limit
+  - Effect.iterate while condition only checks remainingFeaturesCount and noChangeCount
+  - Loop continues indefinitely if features never pass
+  - Add state.iteration < config.maxIterations to while condition
+
+P1.175 DashboardLive Missing Control Endpoints ► DashboardLive.ts:111-179
+  - Spec defines /pause, /resume, /step-mode, /stop, /prompt endpoints (specs/dashboard.md:26-36)
+  - DashboardLive.ts only implements /events and static file serving
+  - server.ts implements all endpoints but is mutable state version
+  - Either add endpoints to DashboardLive or integrate server.ts
+  - Critical for dashboard UI functionality
+
+P1.176 Missing Logging Endpoints ► server.ts, DashboardLive.ts
+  - Spec requires /iterations, /logs/:iteration, /rerun (specs/logging-telemetry.md:274-284)
+  - Neither server.ts nor DashboardLive.ts implements these
+  - Required for state recovery on browser reconnect
+  - Part of LoggingService feature (P3.22)
+
+P1.177 Unprotected JSON.parse in getRemainingFeatures ► src/container.ts:42
+  - JSON.parse(featuresJson) can throw SyntaxError
+  - Called from program.ts:237 without error handling
+  - Should wrap in Effect.try() or validate with FeatureError
+  - Or use existing error type for feature parsing failures
+
+P1.178 Silent Error Swallowing in DashboardLive ► DashboardLive.ts:29-34
+  - broadcastToClients() has try-catch with empty catch block
+  - Failed broadcasts silently ignored
+  - Could mask client connection issues
+  - At minimum log errors; consider propagating for retry
+
+P1.179 copyToContainer Not Implemented ► DockerLive.ts:290
+  - Returns Effect.dieMessage("Not implemented yet")
+  - Causes program crash if called
+  - Required for bulk file operations per Docker.ts:111-115
+  - Implement using `docker cp` command
+
+P1.180 --mode Flag Not Documented ► specs/orchestrator.md:173-181
+  - src/args.ts:11,45-47 implements --mode (plan|build)
+  - src/args.test.ts:120-143 tests all mode variations
+  - Spec CLI argument table has no mention of --mode
+  - Add to spec or remove from implementation
+
+P1.181 maxIterations Comment Wrong in Service ► services/Config.ts:13
+  - Comment says "default: 5"
+  - Actual default is 50 (args.ts:14, specs/orchestrator.md:178)
+  - Misleading documentation
+
+P1.182 featuresPath Comment Wrong in Service ► services/Config.ts:11
+  - Comment says "default: features.json"
+  - Actual default is ".ralph/features.json" (args.ts:18, specs/features.md:3)
+  - Missing .ralph/ prefix in comment
+
+P1.183 Effect Config Missing ANTHROPIC_API_KEY ► ConfigLive.ts:35-47
+  - Legacy ralph.ts:171 passes ANTHROPIC_API_KEY to container
+  - Legacy ralph.ts:358-361 accepts either OAuth token OR API key
+  - ConfigLive only reads CLAUDE_CODE_OAUTH_TOKEN
+  - Add ANTHROPIC_API_KEY as optional alternative
+
+P1.184 Effect Config Missing GIT_AUTHOR Vars ► ConfigLive.ts:35-47, program.ts:41-44
+  - Legacy ralph.ts:173-174 passes GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL
+  - Effect program.ts:41-44 only passes 2 env vars to container
+  - Git commits inside container will have wrong author
+  - Add GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL to config and container env
+
+P1.185 No Validation for Numeric CLI Args ► args.ts:35-43
+  - parseInt() results not validated for NaN, negative, or zero
+  - --max-iterations -5 or --max-iterations abc silently accepted
+  - --dashboard-port 99999 exceeds valid port range
+  - Test at args.test.ts:87-90 confirms NaN accepted
+  - Use ValidationError (currently unused) to reject invalid values
+
+New P2 Items (Jan 2026 - Iteration 14):
+P2.58 No Request Validation on POST/PUT Endpoints ► server.ts:244-280
+  - POST /step-mode, PUT /prompt lack Content-Type check
+  - JSON parsing errors not caught
+  - Type assertions without runtime validation
+  - Malformed requests silently pass or crash
+
+P2.59 Inconsistent Error Response Format ► server.ts:196-208
+  - Errors return plain text: new Response("Not found", { status: 404 })
+  - Success responses return JSON: { paused: boolean }
+  - Should use consistent JSON error format: { error: "...", code: "..." }
+
+P2.60 DashboardLive Static Files No MIME Types ► DashboardLive.ts:171
+  - Returns raw file without Content-Type header
+  - Browsers must guess from extension
+  - server.ts:199-204 sets MIME type properly
+
+P2.61 State Counters Reset on Resume ► src/program.ts, src/container.ts
+  - When resuming via --branch, iteration/noChangeCount reset to 0
+  - Branch may have 10 commits but shows "Iteration 1"
+  - Consider inferring iteration count from git log on resume
+
+New P3 Items (Jan 2026 - Iteration 14):
+P3.28 LoggingService Not Implemented ► logging-telemetry.md:302-306
+  - Phase 1 feature entirely unimplemented
+  - No LoggingService in src/services/
+  - Required for: JSONL append, iteration markers, /logs endpoint, browser recovery
+  - Blocking P1.176 logging endpoints
+
+New P4 Items (Jan 2026 - Iteration 14):
+P4.28 Volume Mount Paths Hardcoded ► program.ts:36-39
+  - ~/.ssh, ~/.claude, templates paths hardcoded
+  - Not configurable via CLI, env, or config
+  - Users can't use non-standard locations
+  - Consider adding --ssh-path, --claude-config-path options
+
+P4.29 timeoutMs Not Configurable ► services/Config.ts:15, program.ts:244
+  - Config interface declares timeoutMs with comment "default: 300000 (5 min)"
+  - ConfigLive.ts:60 hardcodes 5 minutes
+  - program.ts:244 hardcodes 10 minutes (different!)
+  - Not exposed as CLI flag or environment variable
+  - Spec doesn't document timeout configuration
+
+New P5 Items (Jan 2026 - Iteration 14):
+P5.39 Test: createSession() ──────────► program.ts:23-200 (no tests)
+  - 180-line function with 8 major steps
+  - Container creation, git ops, file system setup
+  - Critical path completely untested
+  - Add integration tests with DockerTest layer
+
+P5.40 Test: startDashboardServer() ───► server.ts:213-301 (no tests)
+  - SSE stream creation, client management
+  - HTTP endpoint handlers
+  - Static file serving
+  - All untested
+
+P5.41 Test: makeDashboardLive() ──────► DashboardLive.ts:9-202 (no tests)
+  - Ref-based state management
+  - SSE client tracking
+  - HTTP server lifecycle
+  - Complex logic untested
+
+P5.42 Test: makeClaudeLive().run() ───► ClaudeLive.ts:21-67 (no tests)
+  - Command building, timeout handling
+  - Error mapping TimeoutException → TimeoutError
+  - Untested
+
+P5.43 Test: makeClaudeLive().runWithEvents() ► ClaudeLive.ts:69-134 (no tests)
+  - NDJSON stream parsing
+  - Timeout on streams
+  - Error transformation
+  - Complex stream logic untested
+
+P5.44 Test: DockerLive methods ───────► DockerLive.ts (no tests)
+  - writeFile stdin piping, inspect multi-call, listByPrefix find command
+  - None have dedicated tests
+
+P5.45 Test: GitLive.hasUnpushedCommits ► GitLive.ts:77-110 (no tests)
+  - Two-step git command execution
+  - Partial failure scenarios
+  - Untested
+
+P5.46 Test: ConfigLive layer ─────────► ConfigLive.ts (no tests)
+  - detectGitRoot command execution
+  - Environment variable loading
+  - Edge cases: invalid git repo, missing token
+
+New P6 Items (Jan 2026 - Iteration 14):
+P6.42 Duplicate Error Type Definitions ► services/*.ts vs errors/index.ts
+  - DockerError, GitError, ClaudeError, TimeoutError defined as both:
+    - Plain interfaces in services/*.ts
+    - Data.TaggedError classes in errors/index.ts
+  - Different property structures cause confusion
+  - Consolidate to single source of truth in errors/index.ts
+
+P6.43 DashboardError Only Interface ──► services/Dashboard.ts:4-8
+  - Interface defined but no TaggedError class
+  - All DashboardService methods declare DashboardError in channel
+  - DashboardLive never throws it
+  - Either implement class or remove from signatures
+
+P6.44 runSync in Async Context ───────► DashboardLive.ts:127-133, 145-150
+  - Effect.runSync() used inside async SSE handlers
+  - Can fail if Effect runtime in inconsistent state
+  - Consider async pattern with Effect.runPromise
+
+P6.45 docker find Errors Suppressed ──► DockerLive.ts:296
+  - listByPrefix uses `|| true` to suppress find errors
+  - Masks permission issues or invalid paths
+  - Consider proper error handling or logging
+
+Iteration 14 Dependency Graph Additions:
+P1.166 Stale Cleanup ─────────────────► P1.1 Main Entry Point (blocks)
+P1.167 listContainersByPrefix ────────► P1.166 Stale Cleanup (required by)
+P1.168 Finally Cleanup ───────────────► P1.1 Main Entry Point (blocks)
+P1.169 Container Health Check ────────► P1.9 ensureContainerRunning (same)
+P1.170 finalVerificationDone ─────────► P1.4 Final Verification Logic (same)
+P1.171 Dashboard Integration ─────────► P1.38 Dashboard Broadcast (same)
+P1.172 Step Mode ─────────────────────► P1.43 Step Mode Implementation (same)
+P1.173 Timeout Continue ──────────────► P1.58 Timeout Error Detection (extends)
+P1.174 Max Iterations Check ──────────► P1.7 --once Flag (related loop control)
+P1.175 DashboardLive Endpoints ───────► P1.42 Dashboard API Completeness (blocks)
+P1.176 Logging Endpoints ─────────────► P3.28 LoggingService (blocked by)
+P1.177 JSON.parse Safety ─────────────► P1.155 Generic JSON Parse (related)
+P1.178 Silent Error Swallow ──────────► Error handling audit
+P1.179 copyToContainer ───────────────► P1.3 copyToContainer (same)
+P1.180 --mode Documentation ──────────► Spec completeness
+P1.181-P1.182 Comment Fixes ──────────► Documentation accuracy
+P1.183 ANTHROPIC_API_KEY ─────────────► P1.6 Environment Validation (extends)
+P1.184 GIT_AUTHOR Vars ───────────────► Container config completeness
+P1.185 Numeric Validation ────────────► P1.159 Unused Error Types (uses ValidationError)
+P2.58 Request Validation ─────────────► P1.156 Request Body Validation (same)
+P2.59 Error Response Format ──────────► API consistency
+P2.60 MIME Types DashboardLive ───────► P4.26 Hardcoded MIME Types (related)
+P2.61 Resume Counters ────────────────► State persistence
+P3.28 LoggingService ─────────────────► P3.22 LoggingService Interface (same)
+P4.28 Volume Paths ───────────────────► Config extensibility
+P4.29 timeoutMs Config ───────────────► P4.25 Hardcoded Timeout (same)
+P5.39-P5.46 Tests ────────────────────► Test coverage expansion
+P6.42 Duplicate Error Types ──────────► P6.39-P6.40 Type Inconsistency (same)
+P6.43 DashboardError Class ───────────► P1.165 DashboardError TaggedError (same)
+P6.44 runSync in Async ───────────────► Effect patterns
+P6.45 find Error Suppression ─────────► Error handling audit
 ```
