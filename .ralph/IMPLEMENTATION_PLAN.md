@@ -15,19 +15,23 @@
 ## Priority 1: Critical - Make It Run (Production Entry Point)
 
 ### Main Entry Point Implementation
-- [ ] **Fix main.ts to call createSession** (refs: src/main.ts, specs/orchestrator.md)
-  - Remove placeholder values (containerName, prompt, state)
-  - Read `.ralph-prompt.md` template from git root
-  - Call createSession() to initialize container
-  - Build MainLive layer with actual runtime values
+- [ ] **Fix main.ts to call createSession** (refs: src/main.ts:17-64, specs/orchestrator.md)
+  - CONFIRMED: main.ts is a placeholder stub (line 17: "NOTE: This is a placeholder implementation")
+  - Remove placeholder values (containerName, prompt, state at lines 29-46)
+  - Read `templates/ralph-instructions.md` and write to container's `.ralph-prompt.md`
+  - Call createSession() to initialize container (function exists in program.ts)
+  - Build MainLive layer with actual runtime values from createSession result
   - Sequence: args → config → createSession → mainLoop
-  - Proper error handling without `as Effect.Effect<void, never, never>` workaround
+  - Proper error handling without `as Effect.Effect<void, never, never>` workaround (line 63)
 
-- [ ] **Implement features.json initialization** (refs: specs/features.md)
-  - Check if `.ralph/features.json` exists in git root
-  - If missing, fail with helpful error message
+- [ ] **Implement features.json initialization** (refs: specs/features.md, src/args.ts:17)
+  - CONFIRMED: Code fully supports features.json (19 file references found)
+  - Default path: `.ralph/features.json` (can override via CLI)
+  - Test example exists at `/workspace/test-features.json`
+  - Check if features.json exists at specified path (from args.featuresPath)
+  - If missing, fail with helpful error: "Features file not found at {path}. See test-features.json for example format."
   - Pass features path through SessionConfig
-  - Copy features.json to container during createSession
+  - Copy features.json to container during createSession (already implemented in ralph.ts:208-213)
 
 - [ ] **Integrate dashboard with main orchestration loop** (refs: specs/dashboard.md, src/layers/DashboardLive.ts)
   - Start dashboard server before main loop (if --dashboard flag)
@@ -38,10 +42,13 @@
   - Hook pause/resume/step controls to main loop
   - Shutdown dashboard cleanly on exit
 
-- [ ] **Remove or consolidate server.ts** (refs: src/server.ts, src/layers/DashboardLive.ts)
-  - Decision needed: DashboardLive (Effect-based) vs server.ts (imperative)
-  - DashboardLive is correct pattern - remove server.ts OR
-  - Clarify if server.ts is for standalone testing
+- [ ] **Remove legacy server.ts** (refs: src/server.ts, src/layers/DashboardLive.ts)
+  - CONFIRMED: server.ts is UNUSED legacy code (zero imports in codebase)
+  - DashboardLive.ts is the ACTIVE Effect-based implementation
+  - server.ts uses imperative style with mutable global state (pre-Effect architecture)
+  - DashboardLive.ts properly integrated in MainLive layer (src/layers/index.ts)
+  - DECISION: **Remove src/server.ts entirely** - it's duplicate legacy code
+  - Keep DashboardLive.ts and DashboardTest.ts
 
 ## Priority 2: High - ZFC Compliance & Orchestrator Specs
 
@@ -171,6 +178,24 @@
 
 ## Discoveries
 
+### Main Entry Point Status (CRITICAL FINDING)
+- **src/main.ts is explicitly marked as placeholder** (line 17: "NOTE: This is a placeholder implementation")
+- All infrastructure is COMPLETE and working:
+  - ✅ createSession() in program.ts - Creates and initializes container
+  - ✅ runIteration() in program.ts - Runs single orchestration loop
+  - ✅ mainLoop() in program.ts - Implements Effect.iterate with circuit breaker
+  - ✅ parseArgs() in args.ts - CLI argument parsing with all flags
+  - ✅ All services (Docker, Claude, Git, Config, Dashboard) fully implemented
+  - ✅ All layers with proper Effect composition
+  - ✅ 80 tests passing, zero TypeScript errors
+- Main.ts needs complete rewrite to connect all the working pieces
+- Current issues:
+  - Hard-coded containerName: "ralph-session-placeholder" (line 31)
+  - Hard-coded prompt string (line 35)
+  - Dummy dashboard state (lines 37-44)
+  - Type cast workaround `as Effect.Effect<void, never, never>` (line 63)
+  - No createSession call, no dashboard integration, no features.json validation
+
 ### Existing Standard Library (src/)
 - Found comprehensive Effect.ts-based architecture
 - All services use Context.Tag pattern with Layer factories
@@ -179,23 +204,37 @@
 - Container utilities parse docker/git output correctly
 - **Extend these patterns** - do not rewrite
 
-### Duplicate Dashboard Implementation
-- DashboardLive.ts (Effect-based, immutable state via Ref) - ✅ CORRECT
-- server.ts (imperative, mutable global state) - ⚠️ DUPLICATE
-- Need to clarify: Remove server.ts or use for standalone testing?
+### Duplicate Dashboard Implementation (RESOLVED)
+- DashboardLive.ts (Effect-based, immutable state via Ref) - ✅ ACTIVE, used in MainLive
+- server.ts (imperative, mutable global state) - ❌ LEGACY, zero imports, should be removed
+- DECISION: Remove server.ts entirely - it's unused pre-Effect code
+- Both files implement identical functionality (SSE streaming, state management, pause/resume)
+- DashboardLive.ts is properly tested via DashboardTest.ts mock layer
 
-### Template System
-- Prompt template lives in `/workspace/templates/ralph-instructions.md` ✅
-- Alternative: `.ralph-prompt.md` in git root (current planning mode instructions)
-- Should read templates/ralph-instructions.md during main.ts initialization
-- Contains critical rules for Claude iterations
-- Must be loaded and passed to runIteration
+### Template System (CLARIFIED)
+- **Feature Implementation Template**: `/workspace/templates/ralph-instructions.md` ✅
+  - Used during normal orchestrator execution (implementing features)
+  - Contains rules: one feature per iteration, EXIT immediately, verify with CI
+  - Written to container's `.ralph-prompt.md` before Claude invocation
+  - Referenced in ralph.ts:474-484 and src/main.ts:31
+- **Planning Mode Template**: `/workspace/.ralph-prompt.md` ✅
+  - Used when generating implementation plans (current mode)
+  - Contains rules: research codebase, identify gaps, generate plan, no implementation
+  - Creates `.ralph/IMPLEMENTATION_PLAN.md` output
+- Both templates use same invocation pattern: `claude "Read .ralph-prompt.md and follow the instructions."`
 
-### Features Configuration
-- `.ralph/features.json` is currently MISSING from the workspace
-- This file is required by the orchestrator (specs/features.md)
-- Main.ts should fail with helpful error if not found
-- Not a blocker for development - can be created when needed
+### Features Configuration (FULLY SUPPORTED)
+- `.ralph/features.json` is currently MISSING from workspace (expected - user provides it)
+- Code is FULLY READY for features.json (found 19 file references):
+  - ralph.ts:208-213 - Copies from git root to container
+  - src/main.ts:20,359 - Reads and parses features array
+  - src/program.ts:223 - Reads from container during iterations
+  - src/args.ts:17,44 - Default path `.ralph/features.json`, CLI override supported
+  - specs/features.md - Complete schema specification
+  - templates/ralph-instructions.md:15-32 - Claude instructions to read/process features.json
+- Test example exists at `/workspace/test-features.json` showing exact format
+- Schema: `{ features: [{ id, description, passes, verify_command }] }`
+- Not a blocker - user will provide when running Ralph
 
 ### Test Coverage Status
 - 80 tests passing (args, container, errors, streams, program)
@@ -212,30 +251,58 @@ None currently. All dependencies are in place:
 - Git operations working
 - All specs documented
 
+## What's Working vs What's Missing
+
+### ✅ Working Infrastructure (Do NOT rewrite)
+- All 5 services fully implemented (Config, Docker, Claude, Git, Dashboard)
+- All Effect layers with proper Context.Tag pattern
+- createSession() orchestration (creates container, waits for firewall, clones repo)
+- runIteration() orchestration (runs Claude, parses output, updates features)
+- mainLoop() with circuit breaker (stops after 3 no-change iterations)
+- CLI argument parsing with all flags
+- Error handling system (10 custom error types with catchTag)
+- Stream utilities for NDJSON parsing
+- Container utilities (name generation, output parsing)
+- 80 passing tests, zero TypeScript errors
+- Template files (ralph-instructions.md for features, .ralph-prompt.md for planning)
+
+### ❌ Missing/Incomplete (Priority 1-2 tasks)
+- **main.ts production implementation** - Currently placeholder stub
+- **Dashboard integration** - DashboardLive exists but not connected to main loop
+- **Features.json validation** - Code supports it but main.ts doesn't validate
+- **Template loading** - templates/ralph-instructions.md not loaded in main.ts
+- **Firewall readiness detection** - Uses sleep instead of log streaming (program.ts:72-73)
+- **Container cleanup** - No stale container removal before session
+- **Container health checks** - No validation before each iteration
+- **Iteration limits** - maxIterations not enforced in mainLoop
+- **--once and --step flags** - Parsed but not implemented
+- **Final verification** - No final CI run after all features complete
+- **server.ts removal** - Legacy unused code should be deleted
+
 ## Implementation Order Recommendation
 
 1. **Start with Priority 1** - Make the entry point work
-   - Fix main.ts to use real createSession
-   - Load .ralph-prompt.md template
-   - Integrate dashboard startup
-   - Remove/consolidate server.ts
+   - Rewrite main.ts to use real createSession (remove placeholder values)
+   - Load templates/ralph-instructions.md and validate features.json exists
+   - Integrate dashboard startup (conditional on --dashboard flag)
+   - Remove legacy server.ts (zero imports, unused)
 
 2. **Then Priority 2** - Complete orchestrator compliance
-   - Firewall readiness detection
-   - Container cleanup and health checks
-   - Iteration limits (maxIterations, --once, --step)
-   - Final verification run
+   - Firewall readiness detection (replace Effect.sleep with log streaming)
+   - Container cleanup and health checks (before session, before each iteration)
+   - Iteration limits (maxIterations, --once, --step flags)
+   - Final verification run (when all features.passes === true)
 
 3. **Then Priority 3** - Fill implementation gaps
-   - Stream Claude events to dashboard
-   - Handle git conflicts
-   - Better error messages
-   - Auto-generate branch names
+   - Stream Claude events to dashboard (use runWithEvents instead of run)
+   - Handle git conflicts (fetch + pull --rebase on push failure)
+   - Better error messages (CLAUDE_CODE_OAUTH_TOKEN, features.json not found)
+   - Auto-generate branch names (ralph/MMDD-HHMM-{feature-slug})
 
 4. **Finally Priority 4** - Polish
-   - Remove workarounds
-   - Add tests
-   - Documentation
+   - Remove `as any` workarounds (Context.Tag shadowing issue)
+   - Add integration tests (main.ts, createSession)
+   - Documentation (inline comments, README usage examples)
 
 ## Success Criteria
 
