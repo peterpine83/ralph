@@ -28,7 +28,11 @@ const args = parseArgs(process.argv.slice(2))
 
 // Placeholder: In a real implementation, these would come from createSession
 const placeholderContainerName = "ralph-session-placeholder"
-const placeholderPrompt = "Read .ralph-prompt.md and follow the instructions."
+
+// Select prompt template based on mode
+const placeholderPrompt = args.mode === "plan"
+  ? "Read /workspace/templates/ralph-plan-mode.md and follow the instructions."
+  : "Read /workspace/templates/ralph-instructions.md and follow the instructions."
 
 // Placeholder initial dashboard state
 const placeholderState = {

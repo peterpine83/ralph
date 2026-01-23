@@ -35,6 +35,8 @@ export const createSession = (sessionConfig: SessionConfig) =>
       capAdd: ["NET_ADMIN"], // Required for firewall setup
       volumes: [
         `${process.env.HOME}/.ssh:/root/.ssh:ro`, // SSH keys for git operations
+        `${process.env.HOME}/.claude:/home/node/.claude:ro`, // Claude CLI config and plugins
+        `${process.cwd()}/templates:/workspace/templates:ro`, // Prompt templates
       ],
       env: [
         `CLAUDE_CODE_OAUTH_TOKEN=${config.oauthToken}`,

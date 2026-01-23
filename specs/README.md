@@ -15,6 +15,7 @@ This directory contains modular specifications for the Ralph autonomous coding o
 | **Networking** | [networking.md](./networking.md) | Firewall, iptables, domain whitelisting |
 | **Claude Integration** | [claude-integration.md](./claude-integration.md) | CLI invocation, stream-json parsing |
 | **Dashboard** | [dashboard.md](./dashboard.md) | SSE server, HTTP endpoints, state management |
+| **Logging & Telemetry** | [logging-telemetry.md](./logging-telemetry.md) | JSONL persistence, iteration metrics, prompt tuning |
 
 ## System Overview
 

@@ -18,6 +18,9 @@ export interface IConfigService {
   readonly once: boolean                    // default: false
   readonly stepMode: boolean                // default: false
   readonly dashboardEnabled: boolean        // default: false
+
+  // Mode
+  readonly mode: "plan" | "build"           // default: "build"
 }
 
 export class ConfigService extends Context.Tag("ralph/ConfigService")<

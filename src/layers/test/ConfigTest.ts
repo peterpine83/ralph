@@ -24,5 +24,8 @@ export const ConfigTest = Layer.succeed(
     once: false,
     stepMode: false,
     dashboardEnabled: false,
+
+    // Mode
+    mode: "build",
   })
 )

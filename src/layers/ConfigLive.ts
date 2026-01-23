@@ -60,7 +60,8 @@ export const makeConfigLive = (cliArgs: CliArgs) =>
         timeoutMs: 5 * 60 * 1000, // 5 minutes
         once: cliArgs.once,
         stepMode: cliArgs.step,
-        dashboardEnabled: cliArgs.dashboard
+        dashboardEnabled: cliArgs.dashboard,
+        mode: cliArgs.mode,
       } satisfies IConfigService
     })
   )

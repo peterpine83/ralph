@@ -12,6 +12,7 @@ describe("parseArgs", () => {
       dashboard: false,
       dashboardPort: 3847,
       step: false,
+      mode: "build",
     })
   })
 
@@ -50,6 +51,7 @@ describe("parseArgs", () => {
       dashboard: false,
       dashboardPort: 3847,
       step: false,
+      mode: "build",
     })
   })
 
@@ -68,6 +70,7 @@ describe("parseArgs", () => {
       dashboard: false,
       dashboardPort: 3847,
       step: false,
+      mode: "build",
     })
   })
 
@@ -112,5 +115,30 @@ describe("parseArgs", () => {
     expect(result.step).toBe(true)
     expect(result.dashboard).toBe(true)
     expect(result.once).toBe(true)
+  })
+
+  test("parses --mode plan", () => {
+    const result = parseArgs(["--mode", "plan"])
+    expect(result.mode).toBe("plan")
+  })
+
+  test("parses --mode build", () => {
+    const result = parseArgs(["--mode", "build"])
+    expect(result.mode).toBe("build")
+  })
+
+  test("defaults to build mode when --mode not specified", () => {
+    const result = parseArgs([])
+    expect(result.mode).toBe("build")
+  })
+
+  test("ignores invalid --mode values", () => {
+    const result = parseArgs(["--mode", "invalid"])
+    expect(result.mode).toBe("build") // Should remain default
+  })
+
+  test("ignores --mode without value", () => {
+    const result = parseArgs(["--mode"])
+    expect(result.mode).toBe("build") // Should remain default
   })
 })

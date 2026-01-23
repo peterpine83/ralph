@@ -41,10 +41,10 @@ import {
 import type { ClaudeEvent, Feature } from "./src/types"
 
 // Future: Once Effect-based implementation is complete, use this instead:
-import "./src/main.js"  // Effect-based main (currently in development)
+// import "./src/main.js"  // Effect-based main (currently in development)
 
-const TIMEOUT_MS = 5 * 60 * 1000  // 5 minutes per iteration
-const MAX_NO_CHANGE = 3           // Circuit breaker: 3 iterations with no git diff
+const TIMEOUT_MS = 60 * 60 * 1000      // 1 hour safety fallback (Claude Code handles its own timeouts)
+const MAX_NO_CHANGE = 3                // Circuit breaker: 3 iterations with no git diff
 
 // Generate human-readable branch name: ralph/MMDD-HHMM-{feature-slug}
 function generateBranchName(features: Feature[]): string {
@@ -57,6 +57,14 @@ function generateBranchName(features: Feature[]): string {
   const slug = firstFeature.slice(0, 25).replace(/[^a-z0-9-]/gi, '-').toLowerCase()
 
   return `ralph/${date}-${time}-${slug}`
+}
+
+// Generate branch name for plan mode: ralph/MMDD-HHMM-plan
+function generatePlanBranchName(): string {
+  const now = new Date()
+  const date = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+  const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+  return `ralph/${date}-${time}-plan`
 }
 
 // IMPORTANT: This script must be run from ~/ralph/ directory
@@ -145,7 +153,7 @@ async function ensureContainerRunning(containerName: string): Promise<boolean> {
 
 // === Container Lifecycle Management ===
 
-async function createSession(gitRoot: string, branch: string, isResume: boolean, featuresPath: string): Promise<string> {
+async function createSession(gitRoot: string, branch: string, isResume: boolean, featuresPath: string, mode: "plan" | "build"): Promise<string> {
   const containerName = generateContainerName()
 
   // Get GitHub token for private repo access (needed for resume/push)
@@ -159,7 +167,8 @@ async function createSession(gitRoot: string, branch: string, isResume: boolean,
     -v ${process.env.HOME}/.ssh:/home/node/.ssh:ro \
     -v ${process.env.HOME}/.claude:/home/node/.claude:rw \
     -v ${process.env.HOME}/.gitconfig:/home/node/.gitconfig:ro \
-    -e CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN} \
+    -e CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN || ''} \
+    -e ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY || ''} \
     -e GITHUB_TOKEN=${githubToken.trim()} \
     -e GIT_AUTHOR_NAME=${process.env.GIT_AUTHOR_NAME || 'Ralph'} \
     -e GIT_AUTHOR_EMAIL=${process.env.GIT_AUTHOR_EMAIL || 'ralph@localhost'} \
@@ -205,12 +214,17 @@ async function createSession(gitRoot: string, branch: string, isResume: boolean,
     // New session: create the feature branch from trunk
     await Bun.$`docker exec -u node ${containerName} git checkout -b ${branch}`
 
-    // Copy features.json from local (defines the work, may not be committed yet)
-    const featuresContent = await Bun.file(`${gitRoot}/${featuresPath}`).text()
-    await Bun.$`docker exec -u node ${containerName} mkdir -p /workspace/.ralph`
-    await Bun.$`docker exec -u node ${containerName} bash -c ${`cat > /workspace/${featuresPath} << 'FEATURES_EOF'
+    // Copy features.json from local (only in build mode - plan mode doesn't need it)
+    if (mode === "build") {
+      const featuresContent = await Bun.file(`${gitRoot}/${featuresPath}`).text()
+      await Bun.$`docker exec -u node ${containerName} mkdir -p /workspace/.ralph`
+      await Bun.$`docker exec -u node ${containerName} bash -c ${`cat > /workspace/${featuresPath} << 'FEATURES_EOF'
 ${featuresContent}
 FEATURES_EOF`}`
+    } else {
+      // Plan mode: just ensure .ralph directory exists
+      await Bun.$`docker exec -u node ${containerName} mkdir -p /workspace/.ralph`
+    }
   }
 
   return containerName
@@ -329,7 +343,7 @@ async function runClaudeInContainer(
 }
 
 async function main(): Promise<void> {
-  const { featuresPath, branch: resumeBranch, once, maxIterations, dashboard, dashboardPort, step } = parseArgs(process.argv.slice(2))
+  const { featuresPath, branch: resumeBranch, once, maxIterations, dashboard, dashboardPort, step, mode } = parseArgs(process.argv.slice(2))
 
   // Setup signal handlers for graceful shutdown
   setupSignalHandlers(dashboard)
@@ -337,9 +351,9 @@ async function main(): Promise<void> {
   // Cleanup any stale containers from previous sessions
   await cleanupStaleContainers()
 
-  // Validate environment
-  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    console.error("ERROR: CLAUDE_CODE_OAUTH_TOKEN not set")
+  // Validate environment - need either OAuth token or API key
+  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+    console.error("ERROR: Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY")
     process.exit(1)
   }
 
@@ -350,16 +364,21 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  // Verify features.json exists and parse it
-  const featuresFile = Bun.file(`${gitRoot}/${featuresPath}`)
-  if (!await featuresFile.exists()) {
-    console.error(`ERROR: Features file not found: ${featuresPath}`)
-    process.exit(1)
+  // Verify features.json exists and parse it (only required for build mode)
+  let featuresData: { features: Feature[] } = { features: [] }
+  if (mode === "build") {
+    const featuresFile = Bun.file(`${gitRoot}/${featuresPath}`)
+    if (!await featuresFile.exists()) {
+      console.error(`ERROR: Features file not found: ${featuresPath}`)
+      process.exit(1)
+    }
+    featuresData = JSON.parse(await featuresFile.text()) as { features: Feature[] }
   }
-  const featuresData = JSON.parse(await featuresFile.text()) as { features: Feature[] }
 
   // Determine branch name and detect resume mode
-  const branch = resumeBranch || generateBranchName(featuresData.features)
+  const branch = resumeBranch || (mode === "plan"
+    ? generatePlanBranchName()
+    : generateBranchName(featuresData.features))
   let isResume = false
 
   if (resumeBranch) {
@@ -377,12 +396,13 @@ async function main(): Promise<void> {
   // Create and start container (runs firewall init ONCE)
   console.log(`\n=== Starting Ralph Session ===`)
   console.log(`Branch: ${branch}`)
-  console.log(`Mode: ${isResume ? 'Resume' : 'New session'}`)
-  const containerName = await createSession(gitRoot, branch, isResume, featuresPath)
+  console.log(`Mode: ${mode} (${isResume ? 'resume' : 'new session'})`)
+  const containerName = await createSession(gitRoot, branch, isResume, featuresPath, mode)
   console.log(`Container: ${containerName}`)
 
-  // Read instructions template
-  const instructionsPath = `${RALPH_HOME}/templates/ralph-instructions.md`
+  // Read instructions template based on mode
+  const templateName = mode === "plan" ? "ralph-plan-mode.md" : "ralph-instructions.md"
+  const instructionsPath = `${RALPH_HOME}/templates/${templateName}`
   const instructions = await Bun.file(instructionsPath).text()
 
   // Start dashboard server if enabled
@@ -440,35 +460,44 @@ async function main(): Promise<void> {
         break
       }
 
-      // Check remaining features (read from container)
-      const featuresJson = await Bun.$`docker exec -u node ${containerName} cat /workspace/${featuresPath}`.text()
-      const remaining = getRemainingFeatures(featuresJson)
+      // Check remaining features (only in build mode)
+      let remaining: { id: string }[] = []
+      if (mode === "build") {
+        const featuresJson = await Bun.$`docker exec -u node ${containerName} cat /workspace/${featuresPath}`.text()
+        remaining = getRemainingFeatures(featuresJson)
 
-      // Parse full features list for dashboard
-      if (dashboard) {
-        try {
-          const parsed = JSON.parse(featuresJson) as { features: Feature[] }
-          updateFeatures(parsed.features)
-          updateIteration(iteration, maxIterations, remaining.length)
-        } catch {
-          // Ignore parse errors
+        // Parse full features list for dashboard
+        if (dashboard) {
+          try {
+            const parsed = JSON.parse(featuresJson) as { features: Feature[] }
+            updateFeatures(parsed.features)
+            updateIteration(iteration, maxIterations, remaining.length)
+          } catch {
+            // Ignore parse errors
+          }
         }
-      }
 
-      if (remaining.length === 0) {
-        if (finalVerificationDone) {
-          console.log("\n=== All features complete and verified! ===")
-          // Mark PR as ready for review
-          await Bun.$`docker exec -u node ${containerName} gh pr ready ${branch}`.quiet().nothrow()
-          break
+        if (remaining.length === 0) {
+          if (finalVerificationDone) {
+            console.log("\n=== All features complete and verified! ===")
+            // Mark PR as ready for review
+            await Bun.$`docker exec -u node ${containerName} gh pr ready ${branch}`.quiet().nothrow()
+            break
+          }
+          console.log("\n=== All features complete! Running final verification iteration... ===")
+          finalVerificationDone = true
+          // Continue to run Claude one more time for final verification
+          // Claude will run typecheck, test, build and fix any issues
         }
-        console.log("\n=== All features complete! Running final verification iteration... ===")
-        finalVerificationDone = true
-        // Continue to run Claude one more time for final verification
-        // Claude will run typecheck, test, build and fix any issues
-      }
 
-      console.log(`${remaining.length} features remaining.`)
+        console.log(`${remaining.length} features remaining.`)
+      } else {
+        // Plan mode: just show iteration info
+        if (dashboard) {
+          updateIteration(iteration, 1, 0)  // Plan mode runs once
+        }
+        console.log("Running planning analysis...")
+      }
 
       // Write prompt to container
       const promptPath = `/workspace/.ralph-prompt.md`
@@ -506,10 +535,24 @@ PROMPT_EOF`}`
       }
 
       // Check if Claude pushed (verify via git log)
-      const pushCheck = await Bun.$`docker exec -u node ${containerName} git log origin/${branch}..HEAD --oneline`.text().catch(() => "")
-      if (hasUnpushedCommits(pushCheck)) {
+      // First check if remote branch exists
+      const remoteBranchExists = await Bun.$`docker exec -u node ${containerName} git ls-remote --heads origin ${branch}`.text().catch(() => "")
+
+      let hasUnpushed = false
+      if (remoteBranchExists.trim()) {
+        // Remote exists - check for unpushed commits
+        const pushCheck = await Bun.$`docker exec -u node ${containerName} git log origin/${branch}..HEAD --oneline`.text().catch(() => "")
+        hasUnpushed = hasUnpushedCommits(pushCheck)
+      } else {
+        // Remote doesn't exist - check if we have any local commits
+        const localCommits = await Bun.$`docker exec -u node ${containerName} git log --oneline -1`.text().catch(() => "")
+        hasUnpushed = localCommits.trim().length > 0
+      }
+
+      if (hasUnpushed) {
         console.log("WARNING: Unpushed commits detected - attempting to push...")
-        const pushResult = await Bun.$`docker exec -u node ${containerName} git push`.nothrow()
+        // Use -u origin HEAD for new branches
+        const pushResult = await Bun.$`docker exec -u node ${containerName} git push -u origin HEAD`.nothrow()
         if (pushResult.exitCode !== 0) {
           console.log("WARNING: Push failed - may need manual intervention")
           noChangeCount++
@@ -562,6 +605,21 @@ PROMPT_EOF`}`
       if (once) {
         console.log("\n=== Single iteration complete (--once flag) ===")
         break
+      }
+
+      // Plan mode: Check if Claude created the PR and is done
+      if (mode === "plan") {
+        // Check if PR exists (Claude's signal that planning is complete)
+        const prExists = await Bun.$`docker exec -u node ${containerName} gh pr view HEAD --json url`.text().catch(() => "")
+        if (prExists.includes('"url"')) {
+          // Check if Claude made any commits this iteration
+          // If PR exists but no new commits, Claude is signaling completion
+          if (!hasUnpushed) {
+            console.log("\n=== Planning complete ===")
+            break
+          }
+        }
+        console.log("\n=== Planning iteration complete, continuing... ===")
       }
     }
   } finally {
