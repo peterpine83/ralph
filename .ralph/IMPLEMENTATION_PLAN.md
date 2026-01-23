@@ -913,6 +913,118 @@
   - CircuitBreakerError only thrown if loop exits for OTHER reason with high noChangeCount
   - Should be checked at end of each iteration, not after entire loop
 
+### 1.127 Path Traversal in readFile/writeFile Operations (NEW - Jan 2026 Iteration 10)
+- [ ] Validate file paths stay within /workspace boundary (refs: DockerLive.ts:244-288) (SECURITY)
+  - **CRITICAL**: File paths passed directly to `cat` and `tee` commands without validation
+  - Attack: `path = "../../../../etc/passwd"` could read host files if container escape occurs
+  - Attack: `path = "/workspace/.ralph/../../../etc/shadow"` path traversal
+  - Add validation that normalized path starts with `/workspace/`
+
+### 1.128 Missing containerName Parameter Validation (NEW - Jan 2026 Iteration 10)
+- [ ] Validate containerName matches expected pattern before interpolation (refs: DockerLive.ts:209,247) (SECURITY)
+  - Container name from external sources interpolated into docker commands
+  - Attack: `containerName = "test; rm -rf /"` could inject commands
+  - Add regex validation: `/^ralph-[a-zA-Z0-9-]+$/`
+  - generateContainerName() creates safe names but no validation on consumption
+
+### 1.129 Unvalidated JSON.stringify in SSE Broadcasts (NEW - Jan 2026 Iteration 10)
+- [ ] Sanitize event data before SSE broadcast (refs: DashboardLive.ts:26-34) (SECURITY)
+  - Dashboard state serialized without sanitization, broadcast to all clients
+  - If `event` contains malicious strings from features.json (user-controlled)
+  - Potential for prototype pollution via `__proto__` in JSON
+  - XSS risk if dashboard client doesn't sanitize received events
+
+### 1.130 Unhandled Async Errors in DashboardLive Fetch Handler (NEW - Jan 2026 Iteration 10)
+- [ ] Add try-catch wrapper for async fetch handler (refs: DashboardLive.ts:115-176)
+  - `async fetch()` handler can throw unhandled promise rejections
+  - Malformed request URL crashes server: `new URL(req.url)` can throw
+  - Filesystem errors during `file.exists()` unhandled
+  - No error boundary, exceptions bubble to Bun.serve
+
+### 1.131 Effect.runSync in Async Context Deadlock Risk (NEW - Jan 2026 Iteration 10)
+- [ ] Replace Effect.runSync with Effect.runPromise in SSE handlers (refs: DashboardLive.ts:127-152)
+  - `Effect.runSync()` called from async SSE stream handlers
+  - If Effect requires async resources, `runSync()` blocks
+  - Called from `ReadableStream.start()` which expects sync completion
+  - No timeout protection, potential infinite hang
+
+### 1.132 features.filter Type Check (NEW - Jan 2026 Iteration 10)
+- [ ] Validate features is array before calling filter (refs: container.ts:41-44)
+  - Extends P1.79 - different failure mode: wrong type instead of missing property
+  - `{"features": "not an array"}` → `.filter()` throws TypeError
+  - `{"features": 123}` → not iterable
+  - Error: "features.filter is not a function"
+
+### 1.133 SSE Client Controller Memory Leak on Error (NEW - Jan 2026 Iteration 10)
+- [ ] Remove failed SSE clients immediately in catch block (refs: DashboardLive.ts:120-154)
+  - Comment says "removed on next cleanup" but no cleanup exists
+  - Failed controllers accumulate in Set indefinitely
+  - Each broadcast iterates over dead controllers
+  - Fix: Delete from Set immediately in catch block, not "later"
+
+### 1.134 Docker Exec Process Leak on Stream Parse Error (NEW - Jan 2026 Iteration 10)
+- [ ] Ensure docker exec cleanup on parseNDJSON error (refs: DockerLive.ts:220-243, ClaudeLive.ts:116)
+  - Extends P1.89/P1.120 - identifies specific failure path
+  - If parseNDJSON() errors during stream consumption, docker exec may continue
+  - `Effect.scoped` completes but underlying process not killed
+  - Zombie `docker exec` processes accumulate over time
+
+### 1.135 ConfigLive detectGitRoot Missing BunContext (NEW - Jan 2026 Iteration 10)
+- [ ] Add Effect.provide(BunContext.layer) to detectGitRoot (refs: ConfigLive.ts:14-25)
+  - `detectGitRoot` runs `git rev-parse` without BunContext.layer
+  - Depends on layer being provided by caller (makeConfigLive)
+  - If called standalone, throws "no provider for CommandExecutor"
+  - All other Command usages include `.pipe(Effect.provide(BunContext.layer))`
+
+### 1.136 GitLive hasUnpushedCommits Fails on Detached HEAD (NEW - Jan 2026 Iteration 10)
+- [ ] Handle detached HEAD state in unpushed detection (refs: GitLive.ts:77-110)
+  - `git branch --show-current` returns empty string on detached HEAD
+  - Command becomes `git log origin/..HEAD` - invalid syntax
+  - Fails with GitError instead of returning false
+  - Can occur during container setup race conditions
+
+### 1.137 mainLoop Circuit Breaker Off-By-One Logic (NEW - Jan 2026 Iteration 10)
+- [ ] Remove redundant post-loop circuit breaker check (refs: program.ts:295-297, 324-330)
+  - Loop exits when `noChangeCount` reaches 3 (due to `< 3` condition)
+  - Then check `>= 3` always true when loop exits via circuit breaker
+  - But if loop exits for other reasons, `noChangeCount` could be 0,1,2
+  - Redundant check, confusing code
+
+### 1.138 ConfigLive GITHUB_TOKEN Empty String vs Undefined (NEW - Jan 2026 Iteration 10)
+- [ ] Use undefined instead of empty string for missing token (refs: ConfigLive.ts:45-47)
+  - Token defaults to empty string instead of undefined
+  - Empty string vs undefined has different semantics
+  - `if (githubToken)` works accidentally (empty string is falsy)
+  - Better pattern: Use `string | undefined` type, return `undefined` on missing
+
+### 1.139 SSH Volume Mount Path Mismatch (NEW - Jan 2026 Iteration 10)
+- [ ] Fix SSH key mount path to match entrypoint.sh expectation (refs: program.ts:37, entrypoint.sh:15-17)
+  - **CRITICAL**: program.ts mounts `~/.ssh:/root/.ssh:ro`
+  - entrypoint.sh looks for `/home/node/.ssh` and copies to `/tmp/.ssh/`
+  - SSH keys never found because mounted to wrong location
+  - Fix: Change mount to `~/.ssh:/home/node/.ssh:ro`
+
+### 1.140 Missing .gitconfig Volume Mount (NEW - Jan 2026 Iteration 10)
+- [ ] Add .gitconfig volume mount to program.ts (refs: program.ts:36-40, ralph.ts:169)
+  - ralph.ts mounts `~/.gitconfig:/home/node/.gitconfig:ro`
+  - program.ts only mounts .ssh, .claude, and templates
+  - User's git configuration not available inside container
+  - Add: `${process.env.HOME}/.gitconfig:/home/node/.gitconfig:ro`
+
+### 1.141 Container Name Format Mismatch (NEW - Jan 2026 Iteration 10)
+- [ ] Align container name generation with cleanup filter pattern (refs: container.ts:20, ralph.ts:137)
+  - generateContainerName() produces `ralph-session-${id}` format
+  - ralph.ts filters for `ralph-session` prefix in cleanup
+  - Inconsistent patterns may cause cleanup to miss stale containers
+  - Verify filter matches actual container name format
+
+### 1.142 Git Clone SSH Key Path Conflict (NEW - Jan 2026 Iteration 10)
+- [ ] Ensure SSH config points to correct key path after entrypoint.sh runs (refs: program.ts:153-167, entrypoint.sh:16-20)
+  - program.ts configures SSH to use `/tmp/.ssh/id_rsa`
+  - This path only exists after entrypoint.sh copies keys from /home/node/.ssh
+  - But P1.139 shows program.ts mounts to /root/.ssh, not /home/node/.ssh
+  - Complete SSH chain is broken: wrong mount → no copy → no key at /tmp/.ssh
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -1129,6 +1241,104 @@
   - Catches ALL exceptions, not just client disconnect
   - If TextEncoder throws (invalid data), JSON.stringify throws (circular ref), errors silently swallowed
   - Should catch specific error types or at least log others
+
+### 2.34 Missing Iteration Sidebar UI Component (NEW - Jan 2026 Iteration 10)
+- [ ] Create iteration sidebar component per spec (refs: App.tsx:84-100, specs/logging-telemetry.md:20-33)
+  - Current layout has only "Features" sidebar, no iteration sidebar
+  - Spec shows two-panel layout: "Iteration Sidebar" + "Activity Panel"
+  - Each iteration card should display: Title, status indicator, token count, context %
+  - No IterationSidebar.tsx component exists in dashboard/src/components/
+
+### 2.35 Tool Calls Expanded by Default (NEW - Jan 2026 Iteration 10)
+- [ ] Change tool_use block default to expanded (refs: ActivityLog.tsx:74, specs/logging-telemetry.md:113-124)
+  - Current: Sets `expanded: false` for tool_use blocks
+  - Spec: "All tool_use events display expanded, with a collapse button"
+  - Opposite behavior from spec requirement
+
+### 2.36 Hide Thinking Blocks Completely (NEW - Jan 2026 Iteration 10)
+- [ ] Remove thinking block rendering entirely (refs: ActivityLog.tsx:51-59, specs/logging-telemetry.md:166-169)
+  - Current: Creates DisplayItem for thinking blocks with truncated preview
+  - Spec: "Claude's thinking content blocks are hidden by default. No toggle needed for MVP"
+  - Thinking blocks should not be rendered at all, not collapsed
+
+### 2.37 Syntax Highlighting for Tool Output (NEW - Jan 2026 Iteration 10)
+- [ ] Add language-aware syntax highlighting (refs: ActivityLog.tsx:234-238, specs/logging-telemetry.md:127-138)
+  - Current: Tool details rendered in plain `<pre>` with no highlighting
+  - Spec: Auto-detect language from file extension, apply Prism.js or highlight.js
+  - No highlighting library imported in dashboard package
+
+### 2.38 Prompt Display at Iteration Start (NEW - Jan 2026 Iteration 10)
+- [ ] Display prompt sent to Claude in activity panel header (refs: ActivityLog.tsx, specs/logging-telemetry.md:170-181)
+  - No logic to extract or display prompts
+  - Spec shows formatted box at top of activity log showing iteration prompt
+  - Required for iteration debugging and prompt tuning workflow
+
+### 2.39 /logs/:iteration Endpoint (NEW - Jan 2026 Iteration 10)
+- [ ] Implement JSONL retrieval for specific iteration (refs: server.ts, DashboardLive.ts, specs/logging-telemetry.md:42)
+  - Neither server.ts nor DashboardLive.ts implement this endpoint
+  - Required for dashboard state recovery on browser refresh
+  - Return JSONL events for specific iteration
+
+### 2.40 /iterations Endpoint (NEW - Jan 2026 Iteration 10)
+- [ ] Implement iteration list with metrics (refs: specs/logging-telemetry.md:273-279)
+  - Neither implementation has this endpoint
+  - Required for populating iteration sidebar after browser reconnect
+  - Return IterationsResponse interface with iterations array
+
+### 2.41 /rerun Endpoint (NEW - Jan 2026 Iteration 10)
+- [ ] Implement re-run iteration with modified prompt (refs: specs/logging-telemetry.md:245-254)
+  - Neither implementation has this endpoint
+  - Critical for prompt tuning workflow
+  - Accept modified prompt, create new iteration N+1
+
+### 2.42 Subagent Task Tool Timing Tracker (NEW - Jan 2026 Iteration 10)
+- [ ] Add elapsed time display for Task tool invocations (refs: ActivityLog.tsx:68-79, specs/logging-telemetry.md:189-227)
+  - Task tool treated same as other tools, no special handling
+  - Spec shows "⏳ Task: ... (42s elapsed)" during execution
+  - Requires tracking tool_use event start time, updating UI during execution
+
+### 2.43 Session Recovery on Browser Refresh (NEW - Jan 2026 Iteration 10)
+- [ ] Implement browser-side state recovery (refs: useSSE.ts:13-36, specs/logging-telemetry.md:260-270)
+  - Browser refresh loses all iteration history and activity log state
+  - Only connects to SSE, no recovery logic
+  - Requires P2.39, P2.40, plus browser-side recovery hook
+
+### 2.44 IterationMetrics Interface in Types (NEW - Jan 2026 Iteration 10)
+- [ ] Define IterationMetrics interface (refs: types.ts, specs/logging-telemetry.md:92-102)
+  - Type not defined despite being core to logging spec
+  - Fields: iteration, status, inputTokens, outputTokens, totalTokens, contextPercent, duration
+  - Blocks iteration sidebar display and /iterations endpoint
+
+### 2.45 iteration_start Event Type (NEW - Jan 2026 Iteration 10)
+- [ ] Add iteration_start to DashboardEvent union (refs: types.ts:70, specs/logging-telemetry.md:72-77)
+  - DashboardEvent missing iteration_start event type
+  - Required for splitting JSONL logs by iteration
+  - Schema: `{"type":"iteration_start","iteration":3,"timestamp":"..."}`
+
+### 2.46 Claude Event Token Data Extraction (NEW - Jan 2026 Iteration 10)
+- [ ] Extract token usage from ClaudeResultEvent for metrics (refs: ActivityLog.tsx:81-93, types.ts:106-111)
+  - Token data present in events but never aggregated or displayed
+  - ClaudeMessageEvent.message.usage contains input_tokens, output_tokens
+  - Required for IterationMetrics totalTokens and contextPercent
+
+### 2.47 .ralph/sessions Directory Structure (NEW - Jan 2026 Iteration 10)
+- [ ] Create session logging directory structure (refs: specs/logging-telemetry.md:56)
+  - Session logging directory doesn't exist and isn't created
+  - Logs stored as `.ralph/sessions/{session-id}.jsonl`
+  - No code creates directory or maps session ID to filename
+
+### 2.48 SSE Error Reconnection Fix (NEW - Jan 2026 Iteration 10)
+- [ ] Fix EventSource recreation in error handler (refs: useSSE.ts:26-32)
+  - Error handler creates new EventSource but doesn't update ref
+  - Doesn't set up onmessage or onerror handlers on new connection
+  - New connection is orphaned and non-functional
+  - Should recursively set up full connection or use ref properly
+
+### 2.49 Prompt Editing UI Component (NEW - Jan 2026 Iteration 10)
+- [ ] Create prompt editing component for re-runs (refs: dashboard/src/, specs/logging-telemetry.md:232-243)
+  - No component for editing prompts and triggering re-runs
+  - Even if /rerun endpoint existed, no UI to call it
+  - Requires editable textarea and "Run" button
 
 ---
 
@@ -1568,6 +1778,32 @@
   - program.ts:82,173,186 use branch unconditionally
   - Should test error behavior or default generation
   - Type vs runtime inconsistency needs coverage
+
+### 5.23 Path Traversal Prevention Tests (NEW - Jan 2026 Iteration 10)
+- [ ] Test file path validation in DockerLive (refs: P1.127)
+  - Test paths with `../` sequences
+  - Test paths outside /workspace boundary
+  - Verify rejection of malicious paths
+  - Security test suite expansion
+
+### 5.24 Container Name Validation Tests (NEW - Jan 2026 Iteration 10)
+- [ ] Test containerName parameter validation (refs: P1.128)
+  - Test names with shell metacharacters
+  - Test command substitution attempts
+  - Verify regex validation of expected pattern
+  - Security test suite expansion
+
+### 5.25 SSE Client Memory Leak Tests (NEW - Jan 2026 Iteration 10)
+- [ ] Test SSE client cleanup on disconnect (refs: P1.133)
+  - Verify failed clients removed from Set immediately
+  - Test memory doesn't grow with disconnected clients
+  - Simulate disconnect and verify cleanup
+
+### 5.26 Detached HEAD Git State Tests (NEW - Jan 2026 Iteration 10)
+- [ ] Test GitLive behavior in detached HEAD state (refs: P1.136)
+  - Simulate detached HEAD condition
+  - Verify graceful handling (return false, not error)
+  - Test edge cases during container setup
 
 ---
 
@@ -2110,16 +2346,60 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 - Phase 4: Subagent tracking (Task tool timing)
 - Phase 5: Prompt editing and re-run functionality
 
-### Priority Summary (Updated Jan 2026 - Iteration 9)
+### Priority Summary (Updated Jan 2026 - Iteration 10)
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 126 items | Blocking basic functionality (includes 5 CRITICAL security: P1.49, P1.81, P1.82, P1.118, P1.119; 3 verified complete; 9 new items from iteration 9) |
-| P2 | Dashboard Integration | 33 items | Core UX features (3 new from iteration 9: CORS, backpressure, silent catch) |
-| P3 | Missing Functionality | 23 items | Logging/telemetry subsystem + streaming (2 new: service interface, layer) |
-| P4 | Robustness | 20 items | Production readiness (2 new: container start timeout, session ID collision) |
-| P5 | Test Coverage | 22 items | Quality assurance (2 new: stale containers parsing, branch param) |
-| P6 | Dashboard & Streaming Integration | 33 items | Event streaming, state sync, lifecycle (6 new patterns from ralph.ts) |
-| **Total** | | **257 items** | ~35% complete |
+| P1 | Critical Integration | 142 items | Blocking basic functionality (includes 5 CRITICAL security: P1.49, P1.81, P1.82, P1.118, P1.119; 3 verified complete; 16 new items from iteration 10) |
+| P2 | Dashboard Integration | 49 items | Core UX features (16 new dashboard/UI gaps from iteration 10) |
+| P3 | Missing Functionality | 23 items | Logging/telemetry subsystem + streaming |
+| P4 | Robustness | 20 items | Production readiness |
+| P5 | Test Coverage | 26 items | Quality assurance (4 new from iteration 10) |
+| P6 | Dashboard & Streaming Integration | 33 items | Event streaming, state sync, lifecycle |
+| **Total** | | **293 items** | ~35% complete |
+
+**Key Findings Iteration 10 (Jan 2026 - Parallel 3-Agent Research)**:
+- **NEW P1.127-P1.142**: 16 new P1 items from comprehensive gap analysis
+  - P1.127: Path traversal in readFile/writeFile operations (SECURITY)
+  - P1.128: Missing containerName parameter validation (SECURITY)
+  - P1.129: Unvalidated JSON.stringify in SSE broadcasts (potential XSS)
+  - P1.130: Unhandled async errors in DashboardLive fetch handler
+  - P1.131: Effect.runSync in async context deadlock risk
+  - P1.132: features.filter type check (TypeError on non-array)
+  - P1.133: SSE client controller memory leak on error
+  - P1.134: Docker exec process leak on stream parse error
+  - P1.135: ConfigLive git root Command missing BunContext
+  - P1.136: GitLive hasUnpushedCommits fails on detached HEAD
+  - P1.137: mainLoop circuit breaker off-by-one logic
+  - P1.138: ConfigLive GITHUB_TOKEN empty string vs undefined
+  - P1.139: SSH volume mount path mismatch (/root/.ssh vs /home/node/.ssh)
+  - P1.140: Missing .gitconfig volume mount in program.ts
+  - P1.141: Container name format mismatch vs cleanup filter
+  - P1.142: Git clone SSH key path conflict with entrypoint.sh
+- **NEW P2.34-P2.49**: 16 new P2 items from dashboard analysis
+  - P2.34: Missing iteration sidebar UI component
+  - P2.35: Tool calls collapsed by default (opposite of spec)
+  - P2.36: Thinking blocks visible (should be hidden)
+  - P2.37: No syntax highlighting for tool output
+  - P2.38: No prompt display at iteration start
+  - P2.39: No /logs/:iteration endpoint
+  - P2.40: No /iterations endpoint
+  - P2.41: No /rerun endpoint
+  - P2.42: No subagent Task tool timing tracker
+  - P2.43: No session recovery on browser refresh
+  - P2.44: No IterationMetrics interface in types
+  - P2.45: No iteration_start event type in DashboardEvent
+  - P2.46: Claude event token data not extracted for metrics
+  - P2.47: No .ralph/sessions directory structure
+  - P2.48: SSE error reconnection creates orphaned EventSource
+  - P2.49: No prompt editing UI for re-runs
+- **NEW P5.23-P5.26**: 4 new test coverage items
+  - P5.23: Path traversal prevention tests
+  - P5.24: Container name validation tests
+  - P5.25: SSE client memory leak tests
+  - P5.26: Detached HEAD git state tests
+- **Security Analysis**: 3 additional security gaps found (path traversal, containerName injection, SSE XSS)
+- **Resource Leak Analysis**: 3 memory/resource leaks identified (SSE controllers, docker exec, missing context)
+- **Major Finding**: SSH key volume mount path mismatch breaks git operations in container
 
 **Key Findings Iteration 9 (Jan 2026 - Parallel 3-Agent Research)**:
 - **NEW P1.118-P1.126**: 9 new P1 items from comprehensive gap analysis
@@ -2548,4 +2828,46 @@ P6.30 Firewall For-Loop Pattern ──► P1.27 explicit 30-iteration for-loop v
 P6.31 Iteration Boundary Sequence ► P4.8 all four checks in order before Claude run
 P6.32 Dashboard Server Timing ────► P1.107 after createSession, before mainLoop
 P6.33 Features Parse Silent Catch ► P6.14 try-catch with silent ignore pattern
+
+New P1 Items (Jan 2026 - Iteration 10):
+P1.127 Path Traversal ────────────► SECURITY (file path validation in DockerLive)
+P1.128 containerName Validation ──► SECURITY (regex validation before interpolation)
+P1.129 SSE JSON Sanitization ─────► SECURITY (XSS prevention in broadcasts)
+P1.130 Async Fetch Error Handling ► DashboardLive refactor
+P1.131 runSync Deadlock ──────────► DashboardLive refactor (use runPromise)
+P1.132 features.filter Type Check ► P1.79 parsed.features Validation
+P1.133 SSE Memory Leak ───────────► P2.13 Stale SSE Cleanup (immediate removal)
+P1.134 Docker Exec Parse Leak ────► P1.120 Exec Scoped Stream Leak
+P1.135 ConfigLive BunContext ─────► ConfigLive.ts standalone fix
+P1.136 Detached HEAD Handling ────► P1.61 GitLive Dual-Path Implementation
+P1.137 Circuit Breaker Logic ─────► P1.126 CircuitBreaker Check Timing
+P1.138 Token Empty String ────────► P1.6 Environment Validation
+P1.139 SSH Mount Path ────────────► P1.55 Volume Mount Paths (CRITICAL - breaks git)
+P1.140 .gitconfig Mount ──────────► P1.55 Volume Mount Paths
+P1.141 Container Name Format ─────► P1.65 listContainersByPrefix
+P1.142 SSH Key Path Chain ────────► P1.139 SSH Mount Path (downstream of mount issue)
+
+New P2 Items (Jan 2026 - Iteration 10):
+P2.34 Iteration Sidebar ──────────► Dashboard UI (new component needed)
+P2.35 Tool Calls Expanded ────────► ActivityLog.tsx fix
+P2.36 Hide Thinking Blocks ───────► ActivityLog.tsx fix
+P2.37 Syntax Highlighting ────────► P2.17 (expand with library integration)
+P2.38 Prompt Display ─────────────► P3.17 Iteration Prompt Display
+P2.39 /logs/:iteration ───────────► P2.30 GET /logs/:iteration
+P2.40 /iterations Endpoint ───────► P2.29 GET /iterations Endpoint
+P2.41 /rerun Endpoint ────────────► P2.28 POST /rerun Endpoint
+P2.42 Task Tool Timing ───────────► P2.20 Task Tool Timing Visualizer
+P2.43 Session Recovery ───────────► P3.20 Session Recovery on Reconnect
+P2.44 IterationMetrics Type ──────► P3.10 IterationMetrics Interface
+P2.45 iteration_start Event ──────► P3.7 iteration_start Event Schema
+P2.46 Token Data Extraction ──────► P3.4 Iteration Metrics
+P2.47 Sessions Directory ─────────► P3.2 LoggingService Implementation
+P2.48 SSE Reconnection Fix ───────► useSSE.ts fix
+P2.49 Prompt Editing UI ──────────► P2.4 Prompt Template Editing
+
+New P5 Items (Jan 2026 - Iteration 10):
+P5.23 Path Traversal Tests ───────► P1.127 Path Traversal
+P5.24 Container Name Tests ───────► P1.128 containerName Validation
+P5.25 SSE Memory Leak Tests ──────► P1.133 SSE Memory Leak
+P5.26 Detached HEAD Tests ────────► P1.136 Detached HEAD Handling
 ```
