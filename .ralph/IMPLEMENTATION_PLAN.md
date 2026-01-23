@@ -139,6 +139,74 @@
   - If both true, Claude is signaling completion → exit gracefully
   - Different from build mode completion (feature-based)
 
+### 1.15 Prompt Template Write-to-Container Workflow
+- [ ] Implement two-step prompt workflow (refs: ralph.ts:406-423, 506-509, 516)
+  - Read template from local filesystem (`${RALPH_HOME}/templates/ralph-instructions.md` or `ralph-plan-mode.md`)
+  - Write template content to container at `/workspace/.ralph-prompt.md` via heredoc
+  - Invoke Claude with path reference: `Read .ralph-prompt.md and follow the instructions.`
+  - Template selected based on mode (plan vs build)
+  - Effect implementation has placeholder in main.ts:32-35 but no container write
+
+### 1.16 AbortController Pattern for Stop Button
+- [ ] Implement AbortController pattern for dashboard stop (refs: ralph.ts:76-82, 513-521)
+  - Maintain global `claudeAbortController: AbortController | null`
+  - Export `abortClaude()` function that calls `abort()` on controller
+  - Wire dashboard callback: `setOnStopCallback(abortClaude)` (ralph.ts:415)
+  - Create controller before each Claude invocation, null after finish
+  - Dual stop paths converge: SIGINT/SIGTERM and dashboard stop button both use this
+
+### 1.17 Remote URL Extraction for Clone
+- [ ] Extract remote URL from host git config (refs: ralph.ts:201)
+  - Use `git remote get-url origin` to get actual remote URL
+  - Clone from remote URL, not local path (ensures clean state, no uncommitted changes)
+  - Current program.ts:82 hardcodes `sessionConfig.gitRoot` as clone source
+
+### 1.18 Clone Branch Selection Logic
+- [ ] Implement branch selection for git clone (refs: ralph.ts:202)
+  - Resume mode: Clone from the resume branch directly
+  - New session: Clone from `trunk`, then create new branch locally
+  - Pattern: `const cloneBranch = isResume ? branch : "trunk"`
+
+### 1.19 Unpushed Commit Detection with Dual Paths
+- [ ] Handle unpushed detection when remote branch doesn't exist (refs: ralph.ts:541-570)
+  - Check if remote branch exists first: `git ls-remote --heads origin ${branch}`
+  - If remote exists: Standard `git log origin/${branch}..HEAD`
+  - If remote doesn't exist: Check `git log --oneline -1` (new branch case)
+  - Push failure should increment noChangeCount (circuit breaker trigger)
+
+### 1.20 PR Ready Command
+- [ ] Mark PR as ready when all features pass final verification (refs: ralph.ts:487)
+  - Run `gh pr ready ${branch}` to convert draft PR to ready-for-review
+  - Use `.quiet().nothrow()` pattern (PR might not exist yet)
+  - This is the final automation step before human review
+
+### 1.21 Container User Switching for Exec
+- [ ] Implement user flag handling in docker exec calls (refs: ralph.ts:208, 211, 215)
+  - Git operations must run as `node` user: `-u node` flag
+  - File ownership changes (chown) must run as root: no `-u` flag
+  - Pattern: Git commands use `-u node`, file operations use root
+
+### 1.22 Circuit Breaker Timeout Handling
+- [ ] Handle timeout case in circuit breaker logic (refs: ralph.ts:530-538)
+  - Failed/timed out Claude runs should also increment noChangeCount
+  - Current program.ts:324-330 only handles successful runs with no changes
+  - Emit bell character (`\x07`) to alert user when circuit breaker triggers
+
+### 1.23 Git Configuration in Container
+- [ ] Configure git in container after clone (refs: specs/container.md:103-114)
+  - `git config --system safe.directory /workspace`
+  - `git config --system credential.helper '!gh auth git-credential'`
+  - `git config --system core.sshCommand "ssh -i /tmp/.ssh/id_rsa -o StrictHostKeyChecking=no"`
+  - Required for git operations to work correctly in container
+
+### 1.24 Firewall Verification Beyond Message Detection
+- [ ] Verify firewall is fully initialized (refs: specs/networking.md:44-99)
+  - Beyond detecting "Ralph Firewall Ready" message, verify:
+  - DNS resolution works (UDP 53 rule in place)
+  - SSH port 22 accessible (for git operations)
+  - All 8 whitelisted domains reachable
+  - `ipset create allowed-domains hash:net` succeeded
+
 ---
 
 ## Priority 2: Dashboard Integration
@@ -161,6 +229,8 @@
   - mainLoop needs to yield between iterations when stepMode enabled
   - Check `dashboard.getState().stepMode` at start of each iteration
   - Pause and wait for user input or dashboard resume
+  - Implement pause/resume polling pattern (ralph.ts:442-449): poll isPaused() with 500ms sleep
+  - After resume: `updateState({ paused: false })` (ralph.ts:597)
 
 ### 2.4 Prompt Template Editing
 - [ ] Wire prompt template editing to mainLoop (refs: src/server.ts:266-280)
@@ -173,8 +243,15 @@
   - `promptForAction()` function for async stdin/stdout interaction
   - After each iteration when stepMode enabled and NOT using dashboard
   - Show prompt: `[c]ontinue, [s]top` with default continue on empty
-  - Race CLI input against dashboard resume when both active
+  - Race CLI input against dashboard resume when both active (ralph.ts:579-596)
+  - Use `Promise.race([promptForAction(), waitForResume()])` pattern
   - Required for step-by-step debugging without browser
+
+### 2.6 Plan Mode Iteration Reporting
+- [ ] Report correct iteration counts in plan mode (refs: ralph.ts:500)
+  - Plan mode reports `maxIterations: 1` to dashboard (not CLI value)
+  - Reports `remaining: 0` since plan mode has no features to track
+  - Pattern: `updateIteration(iteration, 1, 0)` for plan mode
 
 ---
 
@@ -362,6 +439,28 @@
 - Docker image: `"ralph-base:latest"` hardcoded in program.ts (line 34)
 - All paths assume `process.env.HOME` exists and has `.ssh` and `.claude` directories
 
+### Implementation Patterns from ralph.ts (Reference for Effect Migration)
+- **Heredoc for File Writing** (ralph.ts:221-223, 507-509): Uses bash heredoc for multi-line file writing
+- **AbortSignal.any()** (ralph.ts:250-251): Combines multiple abort signals for timeout + user cancellation
+- **NDJSON Event Streaming** (ralph.ts:256-303): Buffer management for streaming JSON events
+- **Promise.race for Input** (ralph.ts:591): Dual input source handling (CLI + dashboard)
+- **Bell Character Alert** (ralph.ts:534): Terminal bell (`\x07`) on circuit breaker
+- **Quiet/Nothrow Flags** (ralph.ts:140, 235, 487, 558): Error suppression for expected failures
+
+### Spec-Documented Requirements Not Yet in Code
+- **SSH Key Setup Verification**: Entrypoint copies keys from `/root/.ssh` to `/tmp/.ssh/`, sets permissions 700/600
+- **Git Safe Directory**: Must configure `safe.directory /workspace` in container
+- **Capability Restriction**: Container should only have `CAP_NET_ADMIN` capability
+- **Clone Must Be From Remote**: Spec explicitly requires clone from `remote_url` not local filesystem copy
+- **"Mark PR Ready" Action**: Spec says "mark PR ready and exit" - implemented via `gh pr ready` command
+
+### Timeout Scope Clarification
+Per research, different operations have different timeouts:
+- **Claude execution**: 10 minutes (default, configurable)
+- **Container startup/firewall wait**: 30 seconds fallback
+- **Docker operations**: Not specified (should use transient failure retry)
+- **Git operations**: Not specified (should use transient failure retry)
+
 ---
 
 ## Blockers
@@ -422,10 +521,10 @@ Per specs/features.md and specs/orchestrator.md, Claude must run full CI suite b
 ### Priority Summary
 | Priority | Category | Items | Status |
 |----------|----------|-------|--------|
-| P1 | Critical Integration | 14 items | Blocking basic functionality |
-| P2 | Dashboard Integration | 5 items | Core UX features |
+| P1 | Critical Integration | 24 items | Blocking basic functionality |
+| P2 | Dashboard Integration | 6 items | Core UX features |
 | P3 | Missing Functionality | 5 items | Logging/telemetry subsystem |
-| P4 | Robustness | 4 items | Production readiness |
+| P4 | Robustness | 3 items | Production readiness |
 | P5 | Test Coverage | 5 items | Quality assurance |
 
 ### Dependency Graph
@@ -434,31 +533,53 @@ P1.9 Startup Cleanup ─────► P1.1 Main Entry Point (cleanup runs FIRS
                                   │
 P1.6 Environment Validation ──────┤
                                   │
+                                  ├─► P1.23 Git Configuration in Container
+                                  │
                                   ├─► P1.10 Container Health Checks
                                   │
                                   ├─► P1.11 Branch Name Generation
                                   │         │
                                   │         └─► P1.13 Resume vs New Session
+                                  │                   │
+                                  │                   └─► P1.18 Clone Branch Selection
+                                  │
+                                  ├─► P1.17 Remote URL Extraction ─► Clone from remote
                                   │
                                   ├─► P1.12 Features.json Copying (build mode)
                                   │
+                                  ├─► P1.15 Prompt Template Write-to-Container
+                                  │
                                   ├─► P1.2 Firewall Ready Detection
+                                  │         │
+                                  │         └─► P1.24 Firewall Verification
                                   │
                                   ├─► P1.3 copyToContainer (optional, for bulk ops)
                                   │
                                   ├─► P1.4 Final Verification Logic
+                                  │         │
+                                  │         └─► P1.20 PR Ready Command
                                   │
                                   ├─► P1.5 Signal Handling
+                                  │         │
+                                  │         └─► P1.16 AbortController Pattern
                                   │
                                   ├─► P1.7 --once Flag Handling
                                   │
                                   ├─► P1.8 maxIterations Enforcement
+                                  │         │
+                                  │         └─► P1.22 Circuit Breaker Timeout Handling
+                                  │
+                                  ├─► P1.19 Unpushed Commit Detection (dual paths)
+                                  │
+                                  ├─► P1.21 Container User Switching
                                   │
                                   └─► P1.14 Plan Mode Completion Detection
 
 P2.* Dashboard ────────────► Requires P1.1 complete first
      │
-     └─► P2.5 Interactive CLI Prompts (can test without dashboard)
+     ├─► P2.5 Interactive CLI Prompts (can test without dashboard)
+     │
+     └─► P2.6 Plan Mode Iteration Reporting
 
 P3.* Logging ──────────────► Can proceed in parallel with P2
 
