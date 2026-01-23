@@ -4773,12 +4773,258 @@ Summary (Iteration 18):
 - 8 new P6 items (P6.56-P6.63) - Minor
 - Total new items: 64
 
+---
+
+## Iteration 19 Research Findings
+
+### Research Areas
+- ZFC Architecture Compliance Analysis
+- Logging & Telemetry Spec vs Implementation
+- Dashboard Spec Compliance Verification
+- Features.json Processing Pipeline
+
+### New P1 Items (Critical Gaps - Logging/Telemetry Subsystem)
+
+P1.235 LoggingService Interface Missing ► specs/logging-telemetry.md:49-52, 335
+  - Gap: No `src/services/Logging.ts` interface exists
+  - Spec Requires: `appendEvent(event)`, `getIterationEvents()`, `getSessionPath()` methods
+  - Dependency: Foundation for entire telemetry subsystem
+
+P1.236 LoggingLive Layer Missing ► specs/logging-telemetry.md:336
+  - Gap: No `src/layers/LoggingLive.ts` implementation
+  - Required For: JSONL file persistence to `.ralph/sessions/{session-id}.jsonl`
+  - Blocks: All persistence and recovery features
+
+P1.237 Session JSONL Files Not Created ► specs/logging-telemetry.md:56, 63
+  - Gap: No JSONL log files created in `.ralph/sessions/`
+  - Impact: No persistent audit trail, no session replay capability
+  - Spec Path: `.ralph/sessions/{session-id}.jsonl`
+
+P1.238 Iteration Boundary Markers Missing ► specs/logging-telemetry.md:72-76, 304
+  - Gap: No `iteration_start` events emitted
+  - Spec Format: `{"type":"iteration_start","iteration":3,"timestamp":"..."}`
+  - Required For: Delineating iterations in JSONL files
+
+P1.239 /logs/:iteration Endpoint Missing ► specs/logging-telemetry.md:42, 282-284, 305
+  - Gap: Server only has `/events` SSE endpoint
+  - Required: HTTP endpoint to retrieve JSONL events for specific iteration
+  - Blocks: Browser recovery and historical log viewing
+
+P1.240 /iterations Endpoint Missing ► specs/logging-telemetry.md:273-279
+  - Gap: No endpoint to return list of iterations with metrics
+  - Required For: Iteration sidebar population
+  - Response Format: Array of `{id, totalTokens, costUsd, status}`
+
+P1.241 Browser Recovery from JSONL Missing ► specs/logging-telemetry.md:261-284, 306
+  - Gap: Dashboard reconnect only recreates SSE, no JSONL loading
+  - Location: dashboard/src/hooks/useSSE.ts:26-32
+  - Should: Load iteration list and logs on reconnect
+
+P1.242 IterationMetrics Type Missing ► specs/logging-telemetry.md:93-101, 339
+  - Gap: No `IterationMetrics` interface in types.ts
+  - Fields: `totalTokens`, `contextPercent`, `costUsd`, `duration_ms`
+  - Note: Token data in events but no aggregation
+
+P1.243 Iteration Sidebar Component Missing ► specs/logging-telemetry.md:81-88, 309
+  - Gap: No `dashboard/src/components/IterationSidebar.tsx`
+  - Currently: Features sidebar exists, no iteration navigation
+  - Required: Show iteration cards with metrics, status indicators
+
+P1.244 Subagent Tracking Missing ► specs/logging-telemetry.md:208-227, 322
+  - Gap: No `SubagentTracker` interface or Task tool timing
+  - Required: Track `tool_use` events with `name: "Task"`
+  - Correlate: With `tool_result` events for duration calculation
+
+P1.245 SubagentIndicator Component Missing ► specs/logging-telemetry.md:344
+  - Gap: No `dashboard/src/components/SubagentIndicator.tsx`
+  - Shows: Spinner with elapsed time during Task execution
+  - Required For: Long-running subagent visibility
+
+P1.246 /rerun Endpoint Missing ► specs/logging-telemetry.md:244-254, 328
+  - Gap: Server has no `/rerun` POST endpoint
+  - Allows: Re-run iteration with modified prompt
+  - Creates: N+1 iteration with user-edited prompt
+
+P1.247 useSessionRecovery Hook Missing ► specs/logging-telemetry.md:346
+  - Gap: No `dashboard/src/hooks/useSessionRecovery.ts`
+  - Purpose: Load iteration history on reconnect/refresh
+  - Currently: Only `useSSE.ts` exists
+
+P1.248 Features.json Schema Validation Missing ► src/container.ts:41-44
+  - Gap: `getRemainingFeatures()` does no schema validation
+  - Missing: Checks for required fields (id, description, passes)
+  - Risk: Invalid JSON structure silently produces undefined values
+
+P1.249 Features.json Required Fields Not Validated ► src/container.ts:42-43
+  - Gap: No validation that `id`, `description`, `passes` fields exist
+  - Missing: Type guards for `verify_command` optional field
+  - Impact: Runtime errors on malformed features.json
+
+### New P2 Items (Type Safety & Spec Compliance)
+
+P2.92 ZFC Violation: Mode-Based Prompt Selection ► src/main.ts:33-35
+  - Gap: Orchestrator selects prompt template based on mode flag
+  - Spec Forbids: Ranking/selection based on heuristics (zfc-architecture.md:76-85)
+  - Pattern: Semantic routing, not pure structural data flow
+  - Risk: Establishes pattern of orchestrator making content decisions
+
+P2.93 ZFC Anti-Pattern: Test Mock Keyword Matching ► src/layers/test/DockerTest.ts:28-40
+  - Gap: Mock uses `includes()` to route responses by command content
+  - Spec Forbids: Keyword-based routing (zfc-architecture.md:206-219)
+  - Risk: Tests don't validate ZFC compliance, pattern could leak to prod
+
+P2.94 Template Field Name Mismatch: verification vs verify_command ► templates/ralph-instructions.md:57,64
+  - Gap: Template uses `verification`, spec uses `verify_command`
+  - Spec Location: specs/features.md:72
+  - Impact: Inconsistent naming between spec and Claude instructions
+
+P2.95 Template References Undefined Schema Fields ► templates/ralph-instructions.md:56,63,65
+  - Gap: Template references `acceptance`, `verification`, `steps` fields
+  - Spec: features.md:6-19 only defines `id`, `description`, `passes`, `verify_command`
+  - Impact: Claude instructions don't match spec schema
+
+P2.96 passes Field Type Not Validated at Runtime ► src/container.ts:43
+  - Gap: No check that `passes` is actually boolean before filtering
+  - Risk: Undefined, null, or string values could pass filter incorrectly
+  - Should: Add type guard validation
+
+P2.97 Feature State Transition Not Tracked ► src/program.ts:237
+  - Gap: No validation that `passes` changed from false to true
+  - Missing: Track which feature Claude worked on in current iteration
+  - Should: Detect if exactly ONE feature was updated
+
+P2.98 FeatureEvent Type Defined But Unused ► src/types.ts:46-52, src/server.ts
+  - Gap: `FeatureEvent` (single feature update) type exists but never sent
+  - Current: Only `FeaturesEvent` (full list) used in practice
+  - Should: Either use the type or remove it
+
+P2.99 Client SSE Reconnection Ref Leak ► dashboard/src/hooks/useSSE.ts:30
+  - Gap: EventSource ref reassignment doesn't update cleanup function reference
+  - Pattern: `eventSourceRef.current = new EventSource(...)` inside error handler
+  - Risk: Old EventSource may not be properly cleaned up on component unmount
+
+### New P3 Items (Robustness & Edge Cases)
+
+P3.56 No Exponential Backoff on SSE Reconnect ► dashboard/src/hooks/useSSE.ts:29
+  - Gap: Fixed 1-second retry on connection error
+  - Should: Implement exponential backoff (1s, 2s, 4s, ..., max 30s)
+  - Prevents: Connection storm on sustained network issues
+
+P3.57 Tool Calls Not Expanded By Default ► dashboard/src/components/ActivityLog.tsx:74
+  - Gap: Tool use events created with `expanded: false`
+  - Spec Requires: `expanded: true` for tool calls (logging-telemetry.md:115-124)
+  - Impact: User must click to expand every tool call
+
+P3.58 Thinking Blocks Should Be Hidden, Not Collapsed ► dashboard/src/components/ActivityLog.tsx:51-59,228-232
+  - Gap: Thinking blocks rendered collapsed with toggle capability
+  - Spec: "hidden by default. No toggle needed" (logging-telemetry.md:167-168)
+  - Should: Filter out thinking content blocks entirely
+
+P3.59 JSON.parse Exception Not Handled in getRemainingFeatures ► src/container.ts:42
+  - Gap: Raw JSON.parse without try-catch
+  - Risk: Throws unhandled exception on invalid JSON
+  - Should: Return Effect with ValidationError
+
+P3.60 Args Validation Enables Non-Compliant Semantic Routing ► src/args.ts:45-47, src/main.ts:33-35
+  - Gap: Structural mode validation serves semantic prompt routing
+  - Analysis: Validation compliant, but purpose is non-compliant routing
+  - Creates: Implicit dependency between CLI parsing and semantic decisions
+
+### New P4 Items (Polish & Documentation)
+
+P4.51 Prompt Display at Iteration Start Missing ► specs/logging-telemetry.md:171-181, 318
+  - Gap: No prompt rendering at top of activity log
+  - Should: Display prompt sent to Claude when viewing iterations
+
+P4.52 Syntax Highlighting Missing ► specs/logging-telemetry.md:126-138, 315
+  - Gap: No Prism.js or highlight.js in dashboard/package.json
+  - Currently: Monospace with color `#79c0ff`, no syntax-specific highlighting
+  - Should: Add language-aware syntax highlighting for tool input/output
+
+P4.53 Task Tool Prompt/Result Special Handling Missing ► specs/logging-telemetry.md:200-204, 324
+  - Gap: Generic tool display for Task tool
+  - Should: Special handling for Task tool's prompt parameter and extended duration
+  - Show: Subagent prompt, spinner during execution, elapsed time
+
+P4.54 Editable Prompt Textarea Missing ► specs/logging-telemetry.md:233-241, 327
+  - Gap: No prompt editor UI in dashboard components
+  - Required For: Prompt tuning and re-run with modifications
+
+P4.55 ToolCall Component Should Be Extracted ► dashboard/src/components/ActivityLog.tsx:191-253
+  - Gap: Tool call rendering exists inline in `LogItem` function
+  - Spec: Should have dedicated `ToolCall.tsx` component (logging-telemetry.md:343)
+  - Benefits: Reusability, testability, separation of concerns
+
+P4.56 Cost Tracking Aggregation Missing ► dashboard/src/components/ActivityLog.tsx:91
+  - Gap: Cost displayed only in result events, no cumulative tracking
+  - Should: Show per-iteration cost aggregation and session total
+
+### New P5 Items (Consistency & Naming)
+
+P5.67 ZFC Boundary Issue: Mode Validation Coupled to Routing ► src/args.ts:45-47 → src/main.ts:33-35
+  - Gap: Structural args validation directly enables semantic routing
+  - Pattern: Validation is compliant, but serves non-compliant purpose
+  - Consider: Refactor to decouple validation from routing logic
+
+P5.68 Iteration Progress Not Extracted to Component ► dashboard/src/App.tsx:51-69
+  - Gap: Iteration progress implemented inline in App.tsx
+  - Spec: Lists IterationProgress as dedicated component (dashboard.md:223)
+  - Should: Extract to `dashboard/src/components/IterationProgress.tsx`
+
+### New P6 Items (Minor Deviations)
+
+P6.64 Terminal Component CSS Still Loaded ► dashboard/src/main.tsx:3, dashboard/src/components/Terminal.tsx
+  - Gap: 93-line xterm implementation never imported but CSS loads
+  - Status: Extends P5.66 (Terminal component unused)
+  - Should: Either use component or remove along with CSS import
+
+P6.65 Table-Like Data Rendering Not Detected ► dashboard/src/components/ActivityLog.tsx:261-286
+  - Gap: JSON formatting exists but no table detection/rendering
+  - Spec Mentions: Structured data rendering (logging-telemetry.md:139-149)
+  - Low Priority: Nice-to-have visual improvement
+
+P6.66 ZFC Compliant Patterns Documented ► Multiple Files
+  - Note: Several patterns are correctly ZFC-compliant:
+  - Boolean filtering: src/container.ts:43 (`!f.passes`)
+  - Length-based change detection: src/layers/GitLive.ts:109
+  - Type-based error handling: src/layers/ClaudeLive.ts:54-59 (`_tag`)
+  - Informational: Document as reference for future development
+
+---
+
+Iteration 19 Dependency Graph Additions:
+P1.235-247 Logging/Telemetry ────────► Complete subsystem (extends P1.220-228)
+  └─ P1.235-236 Service/Layer ───────► Foundation for all telemetry
+  └─ P1.237-238 JSONL Persistence ───► Session storage and boundaries
+  └─ P1.239-240 HTTP Endpoints ──────► API access to logs
+  └─ P1.241 Browser Recovery ────────► Reconnection with state
+  └─ P1.242-245 UI Components ───────► Dashboard iteration/subagent views
+  └─ P1.246-247 Prompt Editing ──────► Re-run capability
+
+P1.248-249 Features Validation ──────► Runtime safety for features.json
+P2.92-93 ZFC Violations ─────────────► Architecture compliance
+P2.94-95 Template/Spec Mismatch ─────► Documentation consistency
+P2.96-99 Type Safety ────────────────► Runtime validation
+P3.56-60 Robustness ─────────────────► Error handling and UX
+P4.51-56 Polish ─────────────────────► Dashboard improvements
+P5.67-68 Consistency ────────────────► Code organization
+P6.64-66 Minor ──────────────────────► Cleanup and documentation
+
+Summary (Iteration 19):
+- 15 new P1 items (P1.235-P1.249) - Logging subsystem and validation
+- 8 new P2 items (P2.92-P2.99) - ZFC compliance and type safety
+- 5 new P3 items (P3.56-P3.60) - Robustness improvements
+- 6 new P4 items (P4.51-P4.56) - Polish and UX
+- 2 new P5 items (P5.67-P5.68) - Consistency
+- 3 new P6 items (P6.64-P6.66) - Minor items
+- Total new items: 39
+
 Running totals:
-- P1 items: 234 (was 214)
-- P2 items: 91 (was 82)
-- P3 items: 55 (was 43)
-- P4 items: 50 (was 40)
-- P5 items: 66 (was 61)
-- P6 items: 63 (was 55)
-- Grand total: 559 items (was 495)
+- P1 items: 249 (was 234)
+- P2 items: 99 (was 91)
+- P3 items: 60 (was 55)
+- P4 items: 56 (was 50)
+- P5 items: 68 (was 66)
+- P6 items: 66 (was 63)
+- Grand total: 598 items (was 559)
 ```
