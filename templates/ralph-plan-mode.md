@@ -4,9 +4,40 @@ You are analyzing this codebase to generate an implementation plan. You may be i
 
 ## First: Check Current State
 
-1. Check if `.ralph/IMPLEMENTATION_PLAN.md` exists - if so, read it to continue from where you left off
-2. Check if a PR already exists: `gh pr view HEAD --json url 2>/dev/null`
-3. If PR exists, you're continuing previous work. If not, this is the first iteration.
+1. Check if `.ralph/plan-status.json` exists - read it to see current iteration and completion status
+2. Check if `.ralph/IMPLEMENTATION_PLAN.md` exists - if so, read it to continue from where you left off
+3. Check if a PR already exists: `gh pr view HEAD --json url 2>/dev/null`
+4. If PR exists, you're continuing previous work. If not, this is the first iteration.
+
+## Status Tracking (Critical for Exit)
+
+You MUST maintain `.ralph/plan-status.json` to signal your progress:
+
+**On first iteration**, create the file:
+```json
+{
+  "complete": false,
+  "iteration": 1
+}
+```
+
+**On each subsequent iteration**, increment the iteration count:
+```json
+{
+  "complete": false,
+  "iteration": 2
+}
+```
+
+**When your plan is comprehensive**, set complete to true:
+```json
+{
+  "complete": true,
+  "iteration": 5
+}
+```
+
+The orchestrator reads this file to know when to stop. Setting `complete: true` is how you signal that planning is done.
 
 ## Research Phase
 
@@ -57,7 +88,7 @@ Write to `.ralph/IMPLEMENTATION_PLAN.md`:
 ### Every iteration where you make changes:
 
 ```bash
-git add .ralph/IMPLEMENTATION_PLAN.md
+git add .ralph/IMPLEMENTATION_PLAN.md .ralph/plan-status.json
 git commit -m "Plan: <brief description of changes>"
 ```
 
@@ -75,5 +106,8 @@ git push
 ## Completion
 
 When your research is complete and the plan is comprehensive:
-- Simply exit without making any more commits
-- The orchestrator detects "PR exists + no new commits" = planning complete
+1. Update `.ralph/plan-status.json` with `"complete": true`
+2. Commit this change along with your final plan update
+3. Push to the remote
+
+The orchestrator detects `complete: true` in the status file and exits the loop.
