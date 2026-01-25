@@ -610,17 +610,18 @@ PROMPT_EOF`}`
         break
       }
 
-      // Plan mode: Check if Claude created the PR and is done
+      // Plan mode: Check if Claude signals completion via plan-status.json
       if (mode === "plan") {
-        // Check if PR exists (Claude's signal that planning is complete)
-        const prExists = await Bun.$`docker exec -u node ${containerName} gh pr view HEAD --json url`.text().catch(() => "")
-        if (prExists.includes('"url"')) {
-          // Check if Claude made any commits this iteration
-          // If PR exists but no new commits, Claude is signaling completion
-          if (!hasUnpushed) {
+        // ZFC-compliant: Read structured JSON, check boolean field
+        const statusContent = await Bun.$`docker exec -u node ${containerName} cat /workspace/.ralph/plan-status.json`.text().catch(() => "{}")
+        try {
+          const status = JSON.parse(statusContent)
+          if (status.complete === true) {
             console.log("\n=== Planning complete ===")
             break
           }
+        } catch {
+          // JSON parse error or file doesn't exist yet - continue iteration
         }
         console.log("\n=== Planning iteration complete, continuing... ===")
       }
